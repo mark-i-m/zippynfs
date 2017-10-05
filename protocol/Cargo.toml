@@ -1,7 +1,10 @@
 [package]
-name = "client"
+name = "zippyrpc"
 version = "0.1.0"
 authors = ["Mark Mansi <markm@cs.wisc.edu>"]
+build = "src/build.rs"
+
+[lib]
+path = "src/zippynfs.rs"
 
 [dependencies]
-zippyrpc = { path = "../protocol" }
