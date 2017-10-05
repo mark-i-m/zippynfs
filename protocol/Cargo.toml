@@ -8,3 +8,6 @@ build = "src/build.rs"
 path = "src/zippynfs.rs"
 
 [dependencies]
+thrift = "0.0.4"
+ordered-float = "0.3.0"
+try_from = "0.2.0"

@@ -1,12 +1,18 @@
-use std::process::Command;
-use std::env;
-use std::path::Path;
+use std::process::{Command, exit};
 
 fn main() {
-    Command::new("../thrift/compiler/cpp/thrift")
-        .args(&["--gen", "rs", "zippynfs.thrift"])
-        .status()
+    let out = Command::new("../thrift/compiler/cpp/thrift")
+        .args(&["--gen", "rs"])
+        .args(&["-out", "src/"])
+        .args(&["src/zippynfs.thrift"])
+        .output()
         .unwrap();
 
-    println!("cargo:rerun-if-changed={}", "zippynfs.thrift");
+    if !out.status.success() {
+        println!("{}", String::from_utf8_lossy(&out.stderr));
+        exit(-1);
+    }
+
+    println!("cargo:rerun-if-changed=\"{}\"", "src/zippynfs.thrift");
+    println!("cargo:rerun-if-changed=\"{}\"", "src/zippynfs.rs");
 }
