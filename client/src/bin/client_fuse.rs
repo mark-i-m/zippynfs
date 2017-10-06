@@ -1,4 +1,5 @@
-#[macro_use] extern crate clap;
+#[macro_use]
+extern crate clap;
 
 extern crate client;
 
@@ -9,8 +10,7 @@ use client::new_client;
 fn is_addr(arg: String) -> Result<(), String> {
     use std::net::ToSocketAddrs;
 
-    arg
-        .to_socket_addrs()
+    arg.to_socket_addrs()
         .map_err(|_| "Not a valid IP:Port".to_owned())
         .map(|_| ())
 }

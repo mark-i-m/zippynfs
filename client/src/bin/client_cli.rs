@@ -1,4 +1,6 @@
-#[macro_use] extern crate clap;
+
+#[macro_use]
+extern crate clap;
 extern crate try_from;
 
 extern crate zippyrpc;
@@ -36,8 +38,7 @@ impl<'a> TryFrom<&'a str> for NfsCommand {
 fn is_addr(arg: String) -> Result<(), String> {
     use std::net::ToSocketAddrs;
 
-    arg
-        .to_socket_addrs()
+    arg.to_socket_addrs()
         .map_err(|_| "Not a valid IP:Port".to_owned())
         .map(|_| ())
 }
@@ -53,6 +54,7 @@ fn run(server_addr: &str, command: NfsCommand) -> Result<(), String> {
     // Attempt to execute the appropriate command
     match command {
         NfsCommand::Null => {
+            println!("Executing NULL");
             client.null().map_err(|e| format!("{}", e))?;
             Ok(())
         }
@@ -80,14 +82,12 @@ fn main() {
     let server_addr = matches.value_of("server").unwrap();
 
     // Get the NFS command
-    let command = matches
-        .value_of("command")
-        .unwrap()
-        .try_into()
-        .unwrap();
+    let command = matches.value_of("command").unwrap().try_into().unwrap();
 
     if let Err(e) = run(server_addr, command) {
         println!("Error! {}", e);
         exit(-1);
+    } else {
+        println!("Success!");
     }
 }

@@ -7,14 +7,14 @@ use thrift::protocol::{TCompactInputProtocol, TCompactOutputProtocol};
 use thrift::transport::{ReadHalf, TFramedReadTransport, TFramedWriteTransport, TIoChannel,
                         TTcpChannel, WriteHalf};
 
-use zippyrpc::{ZippynfsSyncClient, TZippynfsSyncClient, ZipFileHandle, ZipAttrStat};
+use zippyrpc::ZippynfsSyncClient;
 
 type ClientInputProtocol = TCompactInputProtocol<TFramedReadTransport<ReadHalf<TTcpChannel>>>;
 type ClientOutputProtocol = TCompactOutputProtocol<TFramedWriteTransport<WriteHalf<TTcpChannel>>>;
 
 /// Create a new thrift client communicating with the given server address.
-pub fn new_client (
-    server_addr: &str
+pub fn new_client(
+    server_addr: &str,
 ) -> thrift::Result<ZippynfsSyncClient<ClientInputProtocol, ClientOutputProtocol>> {
     let mut c = TTcpChannel::new();
 
