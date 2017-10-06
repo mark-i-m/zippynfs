@@ -1,67 +1,67 @@
 namespace rs zippy
 
-struct FileHandle {
+struct ZipFileHandle {
 }
 
-struct AttrStat {
+struct ZipAttrStat {
 }
 
-struct SattrArgs{
+struct ZipSattrArgs{
 }
 
-struct DirOpArgs{
+struct ZipDirOpArgs{
 }
 
-struct DirOpRes{
+struct ZipDirOpRes{
 }
 
-struct ReadArgs{
+struct ZipReadArgs{
 }
 
-struct ReadRes{
+struct ZipReadRes{
 }
 
-struct ReadDirArgs{
+struct ZipReadDirArgs{
 }
 
-struct ReadDirRes{
+struct ZipReadDirRes{
 }
 
-struct WriteArgs{
+struct ZipWriteArgs{
 }
 
-struct CreateArgs{
+struct ZipCreateArgs{
 }
 
-struct Stat{
+struct ZipStat{
 }
 
-struct StatFsRes{
+struct ZipStatFsRes{
 }
 
-struct RenameArgs{
+struct ZipRenameArgs{
 }
 
-struct CommitArgs{
+struct ZipCommitArgs{
 }
 
-struct CommitRes{
+struct ZipCommitRes{
 }
 
 service Zippynfs {
 
    void null();
-   AttrStat getattr(1:FileHandle fhandle);
-   AttrStat setattr(1:SattrArgs setargs);
-   DirOpRes lookup(1:DirOpArgs dirargs);
-   ReadRes read(1:ReadArgs rdargs);
-   AttrStat write(1:WriteArgs wrargs);
-   DirOpRes create(1:CreateArgs crtargs);
-   Stat remove(1:DirOpArgs rmfargs);
-   Stat rename(1:RenameArgs mvargs);
-   DirOpRes mkdir(1:CreateArgs crtdargs);
-   Stat rmdir(1:DirOpArgs rmdargs);
-   ReadDirRes readdir(1:ReadArgs rddargs);
-   StatFsRes statfs(1:FileHandle fhndl);
-   CommitRes commit(1:CommitArgs cmtargs)
+   ZipAttrStat getattr(1:ZipFileHandle fhandle);
+   ZipAttrStat setattr(1:ZipSattrArgs fsargs);
+   ZipDirOpRes lookup(1:ZipDirOpArgs fsargs);
+   ZipReadRes read(1:ZipReadArgs fsargs);
+   ZipAttrStat write(1:ZipWriteArgs fsargs);
+   ZipDirOpRes create(1:ZipCreateArgs fsargs);
+   ZipStat remove(1:ZipDirOpArgs fsargs);
+   ZipStat rename(1:ZipRenameArgs fsargs);
+   ZipDirOpRes mkdir(1:ZipCreateArgs fsargs);
+   ZipStat rmdir(1:ZipDirOpArgs fsargs);
+   ZipReadDirRes readdir(1:ZipReadArgs fsargs);
+   ZipStatFsRes statfs(1:ZipFileHandle fhandle);
+   ZipCommitRes commit(1:ZipCommitArgs fsargs)
 }
