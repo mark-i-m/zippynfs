@@ -14,5 +14,5 @@ fn main() {
     }
 
     println!("cargo:rerun-if-changed=\"{}\"", "src/zippynfs.thrift");
-    println!("cargo:rerun-if-changed=\"{}\"", "src/zippynfs.rs");
+    //println!("cargo:rerun-if-changed=\"{}\"", "src/zippynfs.rs");
 }

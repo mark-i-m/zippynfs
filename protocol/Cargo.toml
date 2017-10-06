@@ -3,6 +3,7 @@ name = "zippyrpc"
 version = "0.1.0"
 authors = ["Mark Mansi <markm@cs.wisc.edu>"]
 build = "src/build.rs"
+exclude = ["src/zippynfs.rs"]
 
 [lib]
 path = "src/zippynfs.rs"

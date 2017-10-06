@@ -5,3 +5,4 @@ authors = ["Mark Mansi <markm@cs.wisc.edu>"]
 
 [dependencies]
 zippyrpc = { path = "../protocol" }
+clap = "2.26"
