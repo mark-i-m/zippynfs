@@ -2,7 +2,9 @@
 
 extern crate client;
 
-use client::foo;
+use std::process::exit;
+
+use client::new_client;
 
 fn is_addr(arg: String) -> Result<(), String> {
     use std::net::ToSocketAddrs;
@@ -22,5 +24,20 @@ fn main() {
             (@arg server: -s --server {is_addr} +required +takes_value "The \"IP:Port\" address of the server")
     }.get_matches();
 
-    foo();
+    // Get the server address
+    let server_addr = matches.value_of("server").unwrap();
+
+    if let Err(e) = run(server_addr) {
+        println!("Error! {}", e);
+        exit(-1);
+    }
+}
+
+fn run(server_addr: &str) -> Result<(), String> {
+    // build a rpc client
+    let mut client = new_client(server_addr).map_err(|e| format!("{}", e))?;
+
+    // TODO
+
+    Ok(())
 }
