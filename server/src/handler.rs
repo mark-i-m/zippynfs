@@ -1,20 +1,31 @@
 
 extern crate thrift;
 
+use std::fs::create_dir;
+use std::path::Path;
+
 use zippyrpc::{ZippynfsSyncHandler, ZipFileHandle, ZipAttrStat, ZipSattrArgs, ZipDirOpArgs,
                ZipDirOpRes, ZipReadArgs, ZipReadRes, ZipWriteArgs, ZipCreateArgs, ZipRenameArgs,
                ZipStat, ZipReadDirRes, ZipStatFsRes, ZipCommitArgs, ZipCommitRes};
 
 /// A server to handle RPC calls
-pub struct ZippynfsServer;
+pub struct ZippynfsServer<P: AsRef<Path>> {
+    data_dir: P,
+}
 
-impl ZippynfsServer {
-    pub fn new() -> ZippynfsServer {
-        ZippynfsServer
+impl<P: AsRef<Path>> ZippynfsServer<P> {
+    /// Returns a new ZippynfsServer
+    pub fn new(data_dir: P) -> ZippynfsServer<P> {
+        ZippynfsServer { data_dir }
+    }
+
+    /// Returns the host file path associated with the given file handle.
+    fn get_path(&self, f: ZipFileHandle) -> Result<String, String> {
+        Err("Unimplemented".into())
     }
 }
 
-impl ZippynfsSyncHandler for ZippynfsServer {
+impl<P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<P> {
     fn handle_null(&self) -> thrift::Result<()> {
         info!("Handling NULL");
         Ok(())
@@ -53,6 +64,22 @@ impl ZippynfsSyncHandler for ZippynfsServer {
     }
 
     fn handle_mkdir(&self, fsargs: ZipCreateArgs) -> thrift::Result<ZipDirOpRes> {
+        info!("Handling Mkdir");
+        info!("{:?}", fsargs);
+
+        // Get the path associated with the given file handle
+        let parent = self.get_path(fsargs.where_.dir)?;
+
+        // TODO: we ought to do something with inode/generation numbers here...
+
+        // Create a new directory
+        let new_dir = format!("{}/{}", parent, fsargs.where_.filename);
+        create_dir(new_dir)?;
+
+        // TODO: set attrs?
+
+        // Create the return value
+        // TODO
         Err("Unimplemented".into())
     }
 

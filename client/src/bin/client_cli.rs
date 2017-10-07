@@ -10,7 +10,10 @@ use try_from::{TryFrom, TryInto};
 use std::process::exit;
 
 use client::new_client;
-use zippyrpc::TZippynfsSyncClient;
+use zippyrpc::{TZippynfsSyncClient, ZipFileHandle, ZipAttrStat, ZipSattrArgs, ZipDirOpArgs,
+               ZipDirOpRes, ZipReadArgs, ZipReadRes, ZipWriteArgs, ZipCreateArgs, ZipRenameArgs,
+               ZipStat, ZipReadDirRes, ZipStatFsRes, ZipCommitArgs, ZipCommitRes, ZipSattr,
+               ZipTimeVal};
 
 /// All valid NFS commands.
 ///
@@ -18,16 +21,29 @@ use zippyrpc::TZippynfsSyncClient;
 /// to parse command line args.
 enum NfsCommand {
     Null,
+    MkDir(String),
 }
 
 impl<'a> TryFrom<&'a str> for NfsCommand {
     type Err = String;
 
     fn try_from(value: &'a str) -> Result<Self, Self::Err> {
-        if value.trim().starts_with("NULL") {
-            Ok(NfsCommand::Null)
-        } else {
-            Err(format!("Unknown command: {}", value))
+        let parts: Vec<&str> = value.trim().split_whitespace().collect();
+
+        if parts.len() < 1 {
+            return Err(format!("No command given"));
+        }
+
+        match parts[0] {
+            "NULL" => Ok(NfsCommand::Null),
+            "MKDIR" => {
+                if parts.len() < 2 {
+                    Err("Mkdir without new dir name".into())
+                } else {
+                    Ok(NfsCommand::MkDir(parts[1].to_owned()))
+                }
+            }
+            _ => Err(format!("Unknown command: {}", value)),
         }
     }
 }
@@ -57,6 +73,42 @@ fn run(server_addr: &str, command: NfsCommand) -> Result<(), String> {
             println!("Executing NULL");
             client.null().map_err(|e| format!("{}", e))?;
             Ok(())
+        }
+
+        NfsCommand::MkDir(new_dir) => {
+            println!("Executing Mkdir {}", new_dir);
+
+            // Create the RPC arguments
+            let args = ZipCreateArgs::new(
+                ZipDirOpArgs::new(
+                    ZipFileHandle::new(
+                        0, // inode // TODO: always create at / ?
+                        0, // generation
+                    ),
+                    new_dir,
+                ),
+                ZipSattr::new(
+                    0777, // mode
+                    0, // uid
+                    0, // gid
+                    ZipTimeVal::new(
+                        0, // s
+                        0, // us
+                    ),
+                    ZipTimeVal::new(
+                        0, // s
+                        0, // us
+                    ),
+                ),
+            );
+
+            // Send the RPC
+            let res = client.mkdir(args);
+
+            // Check the result
+            println!("Received response: {:?}", res);
+
+            res.map(|_| ()).map_err(|e| format!("{}", e))
         }
     }
 }

@@ -40,10 +40,10 @@ fn is_addr(arg: String) -> Result<(), String> {
 /// acts on them.
 fn run<P>(server_addr: &str, data_dir: P) -> Result<(), String>
 where
-    P: AsRef<Path>,
+    P: AsRef<Path> + Send + Sync + 'static,
 {
     // Initialize the logger
-    env_logger::init();
+    env_logger::init().map_err(|e| format!("{}", e))?;
 
     info!("Hello! The server is starting!");
 
@@ -55,7 +55,7 @@ where
     let o_prot_fact = TCompactOutputProtocolFactory::new();
 
     // demux incoming messages
-    let processor = ZippynfsSyncProcessor::new(ZippynfsServer::new());
+    let processor = ZippynfsSyncProcessor::new(ZippynfsServer::new(data_dir));
 
     info!("Creating a server with 10 workers");
 
@@ -94,7 +94,7 @@ fn main() {
     let server_addr = matches.value_of("server").unwrap();
 
     // Get the server data dir
-    let data_dir = matches.value_of("data_dir").unwrap();
+    let data_dir = matches.value_of("data_dir").unwrap().to_owned();
 
     if let Err(e) = run(server_addr, data_dir) {
         println!("Error! {}", e);
