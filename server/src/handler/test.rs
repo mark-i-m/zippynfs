@@ -79,3 +79,29 @@ fn test_fs_find_by_fid() {
     assert_eq!(path6, Ok(None));
     assert_eq!(path7, Ok(None));
 }
+
+#[test]
+fn test_fs_find_by_name() {
+    // Create a server
+    let server = ZippynfsServer::new("test_files/test1");
+
+    // Look for a bunch of stuff, and make sure we get the right results
+    let find1 = server.fs_find_by_name("test_files/test1/0".into(), "foo");
+    let find2 = server.fs_find_by_name("test_files/test1/0/1".into(), "bar");
+    let find3 = server.fs_find_by_name("test_files/test1/0/1/2".into(), "zee.txt");
+    let find4 = server.fs_find_by_name("test_files/test1/0".into(), "baz.txt");
+    let find5 = server.fs_find_by_name("test_files/test1/0".into(), "bazee");
+    let find7 = server.fs_find_by_name("test_files/test1/0".into(), "deleted.txt");
+    let find8 = server.fs_find_by_name("test_files/test1/0".into(), ".");
+    let find9 = server.fs_find_by_name("test_files/test1/0".into(), "fignewton");
+
+    // Correctness
+    assert_eq!(find1, Ok(Some(1)));
+    assert_eq!(find2, Ok(Some(2)));
+    assert_eq!(find3, Ok(Some(3)));
+    assert_eq!(find4, Ok(Some(4)));
+    assert_eq!(find5, Ok(Some(5)));
+    assert_eq!(find7, Ok(None));
+    assert_eq!(find8, Ok(None));
+    assert_eq!(find9, Ok(None));
+}

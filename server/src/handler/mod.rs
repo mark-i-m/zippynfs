@@ -37,6 +37,8 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
         ZippynfsServer { data_dir, counter }
     }
 
+    /// A helper for `fs_find_by_fid`, which returns the named and numbered files in
+    /// a given path, separating them by the given regex.
     fn get_numbered_and_named_files(
         &self,
         re: &Regex,
@@ -63,6 +65,12 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
         }))
     }
 
+    /// Returns the path to the file with the given `fid`.
+    ///
+    /// This is implemented as a BFS over the file system. We expect that it would be
+    /// called very rarely, such as after a crash, once we have implemented caching.
+    ///
+    /// TODO: some sort of caching
     fn fs_find_by_fid(&self, fid: Fid) -> Result<Option<PathBuf>, String> {
         // Initialize state for BFS, starting at root
         let mut queue = VecDeque::new();
@@ -81,6 +89,7 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
 
             // If path is a dir...
             if path.is_dir() {
+                // Expand this node (dir) in the BFS
                 let (numbered_files, named_files) = self.get_numbered_and_named_files(&re, &path)?;
 
                 // Extract fid's from named files into extracted_numbers
@@ -107,6 +116,36 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
         }
 
         // No such fid
+        Ok(None)
+    }
+
+    /// Get the id associated with a file named `fname` in the directory `path` on the NFS server.
+    fn fs_find_by_name(&self, path: PathBuf, fname: &str) -> Result<Option<usize>, String> {
+        // Sanity
+        assert!(fname.len() > 0);
+
+        // Compile regex to check if a filename is a numbered file
+        let re_is_name = Regex::new(r"^\d+$").unwrap();
+
+        // Compile regex to check if this is the file we want
+        let re_is_file = Regex::new(&format!("^(\\d+)\\.{}$", fname)).unwrap();
+
+        // Get the named and numbered files in the directory
+        let (numbered_files, named_files) = self.get_numbered_and_named_files(&re_is_name, &path)?;
+
+        for fname in named_files.iter() {
+            // Found a match
+            if let Some(id) = re_is_file
+                .captures(fname.file_name().unwrap().to_str().unwrap())
+                .map(|m| m.get(1).unwrap().as_str().parse().unwrap())
+            {
+                // Check that there is a matching numbered file
+                if numbered_files.contains(&path.as_path().join(format!("{}", id))) {
+                    return Ok(Some(id));
+                }
+            }
+        }
+
         Ok(None)
     }
 }
