@@ -82,8 +82,8 @@ fn run(server_addr: &str, command: NfsCommand) -> Result<(), String> {
             let args = ZipCreateArgs::new(
                 ZipDirOpArgs::new(
                     ZipFileHandle::new(
-                        0, // inode // TODO: always create at / ?
-                        0, // generation
+                        // TODO: how do get the parent FH?
+                        0, // fid
                     ),
                     new_dir,
                 ),

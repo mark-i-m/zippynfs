@@ -4,8 +4,10 @@ version = "0.1.0"
 authors = ["Mark Mansi <markm@cs.wisc.edu>"]
 
 [dependencies]
+regex = "0.2"
 thrift = "0.0.4"
 zippyrpc = { path = "../protocol" }
 clap = "2.26"
 log = "0.3.8"
 env_logger = "0.4.3"
+memmap = "0.5.2"

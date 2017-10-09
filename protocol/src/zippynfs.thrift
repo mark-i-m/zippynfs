@@ -33,15 +33,14 @@ struct ZipFattr {
     8: required i64 rdev;
     9: required i64 blocks;
    10: required i64 fsid;
-   11: required i64 fileid;
+   11: required i64 fid;
    12: required ZipTimeVal atime;
    13: required ZipTimeVal mtime;
    14: required ZipTimeVal ctime;
 }
 
 struct ZipFileHandle {
-    1: required i64 inode;
-    2: required i64 generation;
+    1: required i64 fid;
 }
 
 struct ZipAttrStat {
