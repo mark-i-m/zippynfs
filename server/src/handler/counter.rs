@@ -35,6 +35,8 @@ impl<'a> AtomicPersistentUsize<'a> {
     pub fn fetch_inc(&mut self) -> usize {
         // NOTE: We must lock before fetch_add because the counter inc and the flush
         // need to happen atomically.
+        // This is important for persistance on disk especially for
+        // the crash recovery
         let locked = self.mmap.lock().unwrap();
 
         // NOTE: This does need to be atomic since we need cache coherency!
