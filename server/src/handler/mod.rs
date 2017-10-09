@@ -14,9 +14,7 @@ use regex::Regex;
 
 use self::counter::AtomicPersistentUsize;
 
-use zippyrpc::{ZippynfsSyncHandler, ZipFileHandle, ZipAttrStat, ZipSattrArgs, ZipDirOpArgs,
-               ZipDirOpRes, ZipReadArgs, ZipReadRes, ZipWriteArgs, ZipCreateArgs, ZipRenameArgs,
-               ZipStat, ZipReadDirRes, ZipStatFsRes, ZipCommitArgs, ZipCommitRes};
+use zippyrpc::*;
 
 type Fid = usize;
 
@@ -165,7 +163,43 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
     }
 
     fn handle_lookup(&self, fsargs: ZipDirOpArgs) -> thrift::Result<ZipDirOpRes> {
-        Err("Unimplemented".into())
+        // Find the directory
+        let dpath = self.fs_find_by_fid(fsargs.dir.fid as usize)?;
+
+        // Make sure that directory exists
+        if dpath.is_none() {
+            // TODO: what NFS error do we return here?
+            return Err("Unimplemented".into());
+        }
+
+        // Lookup the file in the directory
+        let fid = self.fs_find_by_name(dpath.unwrap(), &fsargs.filename)?;
+
+        // Return a result
+        match fid {
+            Some(fid) => {
+                Ok(ZipDirOpRes::new(
+                    ZipFileHandle::new(fid as i64),
+                    ZipFattr::new(
+                        ZipFtype::NFREG, // file type
+                        0777, // mode
+                        1, // number of links
+                        0, // uid
+                        0, // gid
+                        0, // TODO size
+                        0, // TODO blocksize
+                        0, // rdev
+                        0, // TODO blocks
+                        0, // fsid
+                        fid as i64,
+                        ZipTimeVal::new(0, 0), // TODO: atime
+                        ZipTimeVal::new(0, 0), // TODO: mtime
+                        ZipTimeVal::new(0, 0), // TODO: ctime
+                    ),
+                ))
+            }
+            None => Err("No Such File or Directory".into()),
+        }
     }
 
     fn handle_read(&self, fsargs: ZipReadArgs) -> thrift::Result<ZipReadRes> {
