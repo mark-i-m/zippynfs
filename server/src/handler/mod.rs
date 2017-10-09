@@ -3,6 +3,9 @@ extern crate thrift;
 
 mod counter;
 
+#[cfg(test)]
+mod test;
+
 use std::fs::{create_dir, read_dir};
 use std::path::{Path, PathBuf};
 use std::collections::{HashSet, VecDeque};
@@ -27,16 +30,43 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
     /// Returns a new ZippynfsServer
     pub fn new(data_dir: P) -> ZippynfsServer<'a, P> {
         // Read the fid counter
-        let counter = AtomicPersistentUsize::from_file(&data_dir).unwrap();
+        let counter = AtomicPersistentUsize::from_file((data_dir).as_ref().join("counter"))
+            .unwrap();
 
         // Create the struct
         ZippynfsServer { data_dir, counter }
     }
 
+    fn get_numbered_and_named_files(
+        &self,
+        re: &Regex,
+        path: &PathBuf,
+    ) -> Result<(HashSet<PathBuf>, HashSet<PathBuf>), String> {
+        // Expand path into it, or return with error
+        assert!(path.exists());
+        assert!(path.is_dir());
+        let it = read_dir(path).map_err(|e| format!("{}", e))?;
+
+        let mut path_bufs = Vec::new();
+        for dirent in it {
+            if dirent.is_err() {
+                return Err("Dirent is missing".into());
+            }
+            path_bufs.push(dirent.unwrap().path());
+        }
+        let path_bufs = path_bufs;
+
+        // Put numbered files (0/, 1/, 3, etc.) in numbered_files
+        // Put named files (0.root, 1.foo, 3.zee.txt, etc.) in named_files
+        Ok(path_bufs.into_iter().partition(|fname| {
+            re.is_match(fname.file_name().unwrap().to_str().unwrap())
+        }))
+    }
+
     fn fs_find_by_fid(&self, fid: Fid) -> Result<Option<PathBuf>, String> {
         // Initialize state for BFS, starting at root
         let mut queue = VecDeque::new();
-        queue.push_back((&self.data_dir).as_ref().to_path_buf());
+        queue.push_back((&self.data_dir).as_ref().join("0"));
 
         // Compile regex to check if a filename is a numbered file
         let re = Regex::new(r"^\d+$").unwrap();
@@ -51,18 +81,7 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
 
             // If path is a dir...
             if path.is_dir() {
-                // Expand path into it, or return with error
-                let mut it = read_dir(path).map_err(|e| format!("{}", e))?;
-                if it.any(|dirent| dirent.is_err()) {
-                    return Err("Dirent is missing".into());
-                }
-
-                // Put numbered files (0/, 1/, 3, etc.) in numbered_files
-                // Put named files (0.root, 1.foo, 3.zee.txt, etc.) in named_files
-                let it = it.map(|dirent| dirent.unwrap().path());
-                let (numbered_files, named_files): (HashSet<PathBuf>, _) = it.partition(|fname| {
-                    re.is_match(fname.file_name().unwrap().to_str().unwrap())
-                });
+                let (numbered_files, named_files) = self.get_numbered_and_named_files(&re, &path)?;
 
                 // Extract fid's from named files into extracted_numbers
                 let extracted_numbers = named_files
