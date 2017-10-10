@@ -8,6 +8,7 @@ mod test;
 
 use std::fs::{create_dir, read_dir};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::{HashSet, VecDeque};
 
 use regex::Regex;
@@ -17,6 +18,17 @@ use self::counter::AtomicPersistentUsize;
 use zippyrpc::*;
 
 type Fid = usize;
+
+const BLOCK_SIZE: u32 = 1 << 12; // 4KB
+
+fn sys_time_to_zip_time(sys_time: SystemTime) -> ZipTimeVal {
+    let since = sys_time.duration_since(UNIX_EPOCH).unwrap();
+
+    let secs = since.as_secs();
+    let nanos = since.subsec_nanos();
+
+    ZipTimeVal::new(secs as i64, nanos as i64)
+}
 
 /// A server to handle RPC calls
 pub struct ZippynfsServer<'a, P: AsRef<Path>> {
@@ -168,16 +180,39 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
 
         // Make sure that directory exists
         if dpath.is_none() {
-            // TODO: what NFS error do we return here?
-            return Err("Unimplemented".into());
+            return Err("NFSERR_STALE: Stale file handle".into());
         }
 
+        let dpath = dpath.unwrap();
+
         // Lookup the file in the directory
-        let fid = self.fs_find_by_name(dpath.unwrap(), &fsargs.filename)?;
+        let fid = self.fs_find_by_name(dpath.clone(), &fsargs.filename)?;
 
         // Return a result
         match fid {
             Some(fid) => {
+                // Get attributes of the file
+                let fmeta = dpath.join(format!("{}", fid)).metadata().unwrap();
+
+                let size = fmeta.len() as u32;
+                let blocks = (size + (BLOCK_SIZE - 1)) / BLOCK_SIZE;
+
+                let created = if fmeta.created().is_ok() {
+                    sys_time_to_zip_time(fmeta.created().unwrap())
+                } else {
+                    ZipTimeVal::new(0, 0)
+                };
+                let modified = if fmeta.modified().is_ok() {
+                    sys_time_to_zip_time(fmeta.modified().unwrap())
+                } else {
+                    ZipTimeVal::new(0, 0)
+                };
+                let accessed = if fmeta.accessed().is_ok() {
+                    sys_time_to_zip_time(fmeta.accessed().unwrap())
+                } else {
+                    ZipTimeVal::new(0, 0)
+                };
+
                 Ok(ZipDirOpRes::new(
                     ZipFileHandle::new(fid as i64),
                     ZipFattr::new(
@@ -186,19 +221,19 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
                         1, // number of links
                         0, // uid
                         0, // gid
-                        0, // TODO size
-                        0, // TODO blocksize
+                        size as i64,
+                        BLOCK_SIZE as i64,
                         0, // rdev
-                        0, // TODO blocks
+                        blocks as i64,
                         0, // fsid
                         fid as i64,
-                        ZipTimeVal::new(0, 0), // TODO: atime
-                        ZipTimeVal::new(0, 0), // TODO: mtime
-                        ZipTimeVal::new(0, 0), // TODO: ctime
+                        accessed,
+                        modified,
+                        created,
                     ),
                 ))
             }
-            None => Err("No Such File or Directory".into()),
+            None => Err("NFSERR_NOENT: No Such File or Directory".into()),
         }
     }
 

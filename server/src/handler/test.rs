@@ -1,11 +1,16 @@
 //! Unit tests for ZippynfsServer
 
+use std::error::Error as std_err;
 use std::fs::read_dir;
 use std::path::Path;
 
 use regex::Regex;
 
-use super::ZippynfsServer;
+use thrift::Error;
+
+use zippyrpc::*;
+
+use super::{ZippynfsServer, BLOCK_SIZE};
 
 #[test]
 fn test_new() {
@@ -104,4 +109,62 @@ fn test_fs_find_by_name() {
     assert_eq!(find7, Ok(None));
     assert_eq!(find8, Ok(None));
     assert_eq!(find9, Ok(None));
+}
+
+#[test]
+fn test_nfs_lookup() {
+    fn fake_dir_op_args(did: i64, filename: &str) -> ZipDirOpArgs {
+        ZipDirOpArgs::new(ZipFileHandle::new(did), filename.to_owned())
+    }
+
+    // Create a server
+    let server = ZippynfsServer::new("test_files/test1");
+
+    // LOOKUP a bunch of things
+    let lookup1 = server.handle_lookup(fake_dir_op_args(0, "foo")).unwrap();
+    let lookup2 = server.handle_lookup(fake_dir_op_args(1, "bar")).unwrap();
+    let lookup3 = server
+        .handle_lookup(fake_dir_op_args(2, "zee.txt"))
+        .unwrap();
+    let lookup4 = server
+        .handle_lookup(fake_dir_op_args(0, "baz.txt"))
+        .unwrap();
+    let lookup5 = server.handle_lookup(fake_dir_op_args(0, "bazee")).unwrap();
+    let lookup7 = server.handle_lookup(fake_dir_op_args(0, "deleted.txt"));
+    let lookup8 = server.handle_lookup(fake_dir_op_args(1, "foo"));
+
+    // Correctness
+    assert!(lookup7.is_err());
+    match lookup7.err().unwrap() {
+        Error::Application(err) => {
+            assert_eq!(err.message, "NFSERR_NOENT: No Such File or Directory")
+        }
+        _ => assert!(false),
+    }
+
+    assert!(lookup8.is_err());
+    match lookup8.err().unwrap() {
+        Error::Application(err) => {
+            assert_eq!(err.message, "NFSERR_NOENT: No Such File or Directory")
+        }
+        _ => assert!(false),
+    }
+
+    assert_eq!(lookup1.file.fid, 1);
+    assert_eq!(lookup2.file.fid, 2);
+    assert_eq!(lookup3.file.fid, 3);
+    assert_eq!(lookup4.file.fid, 4);
+    assert_eq!(lookup5.file.fid, 5);
+
+    assert_eq!(lookup1.attributes.size, 2048);
+    assert_eq!(lookup2.attributes.size, 2048);
+    assert_eq!(lookup3.attributes.size, 0);
+    assert_eq!(lookup4.attributes.size, 0);
+    assert_eq!(lookup5.attributes.size, 2048);
+
+    assert_eq!(lookup1.attributes.fid, 1);
+    assert_eq!(lookup2.attributes.fid, 2);
+    assert_eq!(lookup3.attributes.fid, 3);
+    assert_eq!(lookup4.attributes.fid, 4);
+    assert_eq!(lookup5.attributes.fid, 5);
 }
