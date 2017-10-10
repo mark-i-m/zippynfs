@@ -7,7 +7,8 @@ mod errors;
 #[cfg(test)]
 mod test;
 
-use std::fs::{create_dir, read_dir};
+use std::fs::{create_dir, read_dir, remove_dir, remove_file, File};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::{HashSet, VecDeque};
@@ -217,6 +218,48 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
             created,
         )
     }
+
+    /// Delete the filesystem object in the given directory with the given fid
+    ///
+    /// NOTE: This method ASSUMES the file actually exists! So you need to check before
+    /// calling this method!
+    fn fs_delete_obj(
+        &self,
+        dpath: PathBuf,
+        fid: u64,
+        fname: &str,
+        is_file: bool,
+    ) -> Result<(), String> {
+        // Get the path of the file itself
+        let fpath_numbered = dpath.join(format!("{}", fid));
+        let fpath_named = dpath.join(fname);
+
+        // Remove named file
+        if is_file {
+            remove_file(fpath_numbered).map_err(|e| format!("{}", e))?;
+        } else {
+            // The directory must be empty, so if we can get any dir entries,
+            // return an error.
+            if fpath_named.read_dir().unwrap().next().is_some() {
+                return Err(NFSERR_NOTEMPTY.into());
+            }
+
+            remove_dir(fpath_numbered).map_err(|e| format!("{}", e))?;
+        }
+
+        // Flush the directory
+        let mut dir = File::open(dpath).unwrap();
+        dir.flush().map_err(|e| format!("{}", e))?;
+
+        // Remove numbered file
+        remove_file(fpath_named).map_err(|e| format!("{}", e))?;
+
+        // Flush the directory
+        dir.flush().map_err(|e| format!("{}", e))?;
+
+        // Done
+        Ok(())
+    }
 }
 
 impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
@@ -298,11 +341,11 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
         Err("Unimplemented".into())
     }
 
-    fn handle_remove(&self, fsargs: ZipDirOpArgs) -> thrift::Result<ZipStat> {
+    fn handle_remove(&self, fsargs: ZipDirOpArgs) -> thrift::Result<()> {
         Err("Unimplemented".into())
     }
 
-    fn handle_rename(&self, fsargs: ZipRenameArgs) -> thrift::Result<ZipStat> {
+    fn handle_rename(&self, fsargs: ZipRenameArgs) -> thrift::Result<()> {
         Err("Unimplemented".into())
     }
 
@@ -326,8 +369,47 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
         Err("Unimplemented".into())
     }
 
-    fn handle_rmdir(&self, fsargs: ZipDirOpArgs) -> thrift::Result<ZipStat> {
-        Err("Unimplemented".into())
+    fn handle_rmdir(&self, fsargs: ZipDirOpArgs) -> thrift::Result<()> {
+        info!("Handling RMDIR {:?}", fsargs);
+
+        // Find the directory
+        let dpath = self.fs_find_by_fid(fsargs.dir.fid as usize)?;
+
+        debug!("Found parent at path {:?}", dpath);
+
+        // Make sure that directory exists
+        if dpath.is_none() {
+            return Err(NFSERR_STALE.into());
+        }
+
+        let dpath = dpath.unwrap();
+
+        // Lookup the file in the directory
+        let fid = self.fs_find_by_name(dpath.clone(), &fsargs.filename)?;
+
+        match fid {
+            Some(fid) => {
+                debug!("File \"{}\" with fid = {}", fsargs.filename, fid);
+
+                // should make sure that it is a dir
+                if !dpath.join(format!("{}", fid)).is_dir() {
+                    Err(NFSERR_NOTDIR.into())
+                } else {
+                    // Remove the object
+                    self.fs_delete_obj(
+                        dpath,
+                        fid as u64,
+                        &fsargs.filename,
+                        false,
+                    )?;
+                    Ok(())
+                }
+            }
+            None => {
+                debug!("File \"{}\" does not exist", fsargs.filename);
+                Err(NFSERR_NOENT.into())
+            }
+        }
     }
 
     fn handle_readdir(&self, fsargs: ZipReadArgs) -> thrift::Result<ZipReadDirRes> {

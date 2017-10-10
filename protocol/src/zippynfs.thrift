@@ -80,9 +80,6 @@ struct ZipCreateArgs{
     2: required ZipSattr attributes;
 }
 
-struct ZipStat{
-}
-
 struct ZipStatFsRes{
 }
 
@@ -103,10 +100,10 @@ service Zippynfs {
    ZipReadRes read(1:ZipReadArgs fsargs);
    ZipAttrStat write(1:ZipWriteArgs fsargs);
    ZipDirOpRes create(1:ZipCreateArgs fsargs);
-   ZipStat remove(1:ZipDirOpArgs fsargs);
-   ZipStat rename(1:ZipRenameArgs fsargs);
+   void remove(1:ZipDirOpArgs fsargs);
+   void rename(1:ZipRenameArgs fsargs);
    ZipDirOpRes mkdir(1:ZipCreateArgs fsargs);
-   ZipStat rmdir(1:ZipDirOpArgs fsargs);
+   void rmdir(1:ZipDirOpArgs fsargs);
    ZipReadDirRes readdir(1:ZipReadArgs fsargs);
    ZipStatFsRes statfs(1:ZipFileHandle fhandle);
    ZipCommitRes commit(1:ZipCommitArgs fsargs)
