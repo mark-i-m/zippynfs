@@ -8,7 +8,7 @@ mod errors;
 mod test;
 
 use std::fs::{create_dir, read_dir, remove_dir, remove_file, File};
-use std::io::Write;
+use std::io::{Error, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::{HashSet, VecDeque};
@@ -219,6 +219,25 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
         )
     }
 
+    fn fs_create_obj(
+        &self,
+        path: PathBuf,
+        fname: &str,
+        is_file: bool,
+    ) -> Result<(Fid, PathBuf), Error> {
+        // TODO: call self.counter.fetch_inc()
+        let fid = 8;
+        let numbered_path = path.join(fid.to_string());
+        let named_path = path.join(format!("{}.{}", fid, fname));
+
+        create_dir(&numbered_path);
+        // TODO: flush
+        File::create(&named_path)?;
+        // TODO: flush
+
+        Ok((fid, numbered_path))
+    }
+
     /// Delete the filesystem object in the given directory with the given fid
     ///
     /// NOTE: This method ASSUMES the file actually exists! So you need to check before
@@ -353,20 +372,48 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
         info!("Handling Mkdir");
         info!("{:?}", fsargs);
 
-        // Get the path associated with the given file handle
-        //let parent = self.get_path(fsargs.where_.dir)?;
+        // Find the directory
+        let dpath = self.fs_find_by_fid(fsargs.where_.dir.fid as usize)?;
 
-        // TODO: we ought to do something with inode/generation numbers here...
+        debug!("Found parent at path {:?}", dpath);
 
-        // Create a new directory
-        //let new_dir = format!("{}/{}", parent, fsargs.where_.filename);
-        //create_dir(new_dir)?;
+        // Make sure that directory exists
+        if dpath.is_none() {
+            return Err(NFSERR_STALE.into());
+        }
 
-        // TODO: set attrs?
+        let dpath = dpath.unwrap();
+        let filename = &fsargs.where_.filename;
 
-        // Create the return value
-        // TODO
-        Err("Unimplemented".into())
+        // Lookup the file in the directory
+        let old_fid = self.fs_find_by_name(dpath.clone(), &fsargs.where_.filename)?;
+
+        // Return a result
+        // TODO: fix race condition on filename using HashSet and Mutex
+        match old_fid {
+            Some(old_fid) => {
+                debug!("File \"{}\" exists", filename);
+                Err(NFSERR_EXIST.into())
+            }
+            None => {
+                // TODO: generation numbers?
+
+                // Create a new directory
+                let (new_fid, numbered_path) = self.fs_create_obj(
+                    dpath,
+                    filename,
+                    true,
+                )?;
+
+                // TODO: set attributes using fsargs.attributes
+
+                // TODO
+                Ok(ZipDirOpRes::new(
+                    ZipFileHandle::new(new_fid as i64),
+                    self.fs_get_attr(numbered_path, new_fid as u64),
+                ))
+            }
+        }
     }
 
     fn handle_rmdir(&self, fsargs: ZipDirOpArgs) -> thrift::Result<()> {
