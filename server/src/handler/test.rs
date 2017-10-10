@@ -1,7 +1,7 @@
 //! Unit tests for ZippynfsServer
 
+#[allow(unused_imports)]
 use std::error::Error as std_err;
-use std::fs::read_dir;
 use std::path::Path;
 
 use regex::Regex;
@@ -10,12 +10,12 @@ use thrift::Error;
 
 use zippyrpc::*;
 
-use super::{ZippynfsServer, BLOCK_SIZE};
+use super::ZippynfsServer;
 
 #[test]
 fn test_new() {
     // Make sure we can create a server
-    let server = ZippynfsServer::new("test_files/test1/");
+    let _server = ZippynfsServer::new("test_files/test1/");
 }
 
 #[test]
