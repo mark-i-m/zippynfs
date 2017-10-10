@@ -1,8 +1,10 @@
 //! Unit tests for ZippynfsServer
 
+use std::process::Command;
 #[allow(unused_imports)]
 use std::error::Error as std_err;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use regex::Regex;
 
@@ -12,6 +14,58 @@ use zippyrpc::*;
 
 use super::ZippynfsServer;
 use super::errors::*;
+
+fn cleanup_git_hackery_test1<P>(fspath: P)
+where
+    P: AsRef<Path>,
+{
+    use std::fs::remove_file;
+
+    println!("{:?}", (&fspath).as_ref().join("0/5/32.empty"));
+
+    remove_file((&fspath).as_ref().join("0/5/32.empty")).unwrap();
+    remove_file((&fspath).as_ref().join("0/6/33.empty")).unwrap();
+}
+
+fn run_with_clone_fs<'t, P, F>(fspath: P, clean_after: bool, f: F)
+where
+    P: AsRef<Path>,
+    F: FnOnce(&Path) -> (),
+{
+    use std::fs::remove_dir_all;
+
+    lazy_static! {
+        static ref FSCOUNT: AtomicUsize = AtomicUsize::new(0);
+    }
+
+    // Create a new unique clone name
+    let new_clone: PathBuf = (&format!(
+        "test_files/_clone_fs_{}",
+        FSCOUNT.fetch_add(1, Ordering::SeqCst)
+    )).into();
+
+    // Cleanup after previous attempts
+    if new_clone.exists() {
+        remove_dir_all(&new_clone).unwrap();
+    }
+
+    // Create the new clone
+    assert!{
+        Command::new("cp")
+            .args(&["-r", (&fspath).as_ref().to_str().unwrap(), new_clone.to_str().unwrap()])
+            .status()
+            .unwrap()
+            .success()
+    };
+
+    // Run the user's test
+    f(&new_clone);
+
+    // Cleanup afterwards, if needed
+    if clean_after {
+        remove_dir_all(new_clone).unwrap();
+    }
+}
 
 #[test]
 fn test_new() {
@@ -249,4 +303,21 @@ fn test_nfs_getattr() {
     assert_eq!(attr3.attributes.type_, ZipFtype::NFREG);
     assert_eq!(attr4.attributes.type_, ZipFtype::NFREG);
     assert_eq!(attr5.attributes.type_, ZipFtype::NFDIR);
+}
+
+#[test]
+fn test_fs_delete_obj() {
+    run_with_clone_fs("test_files/test1/", false, |fspath| {
+        // Do some cleanup (to get around git hackery)
+        cleanup_git_hackery_test1(fspath);
+
+        // Create a server
+        let server = ZippynfsServer::new(fspath);
+
+        // Delete a couple of items
+        let del4 = server.fs_delete_obj(fspath.join("0"), 4, "baz.txt", true);
+        let del5 = server.fs_delete_obj(fspath.join("0"), 5, "bazee", true);
+
+        // TODO
+    })
 }

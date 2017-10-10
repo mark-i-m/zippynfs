@@ -13,3 +13,5 @@
 **/*.swo
 
 protocol/src/zippynfs.rs
+
+server/test_files/_clone_fs*
