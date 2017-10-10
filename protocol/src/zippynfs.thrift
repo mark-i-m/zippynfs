@@ -44,6 +44,7 @@ struct ZipFileHandle {
 }
 
 struct ZipAttrStat {
+    1: required ZipFattr attributes
 }
 
 struct ZipSattrArgs{

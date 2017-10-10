@@ -11,6 +11,7 @@ use thrift::Error;
 use zippyrpc::*;
 
 use super::ZippynfsServer;
+use super::errors::*;
 
 #[test]
 fn test_new() {
@@ -112,6 +113,39 @@ fn test_fs_find_by_name() {
 }
 
 #[test]
+fn test_fs_get_attr() {
+    // Create a server
+    let server = ZippynfsServer::new("test_files/test1");
+
+    // Get attributes for a bunch of files
+    let attr0 = server.fs_get_attr("test_files/test1/0".into(), 0);
+    let attr1 = server.fs_get_attr("test_files/test1/0/1".into(), 1);
+    let attr2 = server.fs_get_attr("test_files/test1/0/1/2".into(), 2);
+    let attr3 = server.fs_get_attr("test_files/test1/0/1/2/3".into(), 3);
+    let attr4 = server.fs_get_attr("test_files/test1/0/4".into(), 4);
+    let attr5 = server.fs_get_attr("test_files/test1/0/5".into(), 5);
+
+    // Correctness
+    assert_eq!(attr0.fid, 0);
+    assert_eq!(attr1.fid, 1);
+    assert_eq!(attr2.fid, 2);
+    assert_eq!(attr3.fid, 3);
+    assert_eq!(attr4.fid, 4);
+    assert_eq!(attr5.fid, 5);
+
+    // For files:
+    assert_eq!(attr3.size, 0);
+    assert_eq!(attr4.size, 0);
+
+    assert_eq!(attr0.type_, ZipFtype::NFDIR);
+    assert_eq!(attr1.type_, ZipFtype::NFDIR);
+    assert_eq!(attr2.type_, ZipFtype::NFDIR);
+    assert_eq!(attr3.type_, ZipFtype::NFREG);
+    assert_eq!(attr4.type_, ZipFtype::NFREG);
+    assert_eq!(attr5.type_, ZipFtype::NFDIR);
+}
+
+#[test]
 fn test_nfs_lookup() {
     fn fake_dir_op_args(did: i64, filename: &str) -> ZipDirOpArgs {
         ZipDirOpArgs::new(ZipFileHandle::new(did), filename.to_owned())
@@ -136,17 +170,13 @@ fn test_nfs_lookup() {
     // Correctness
     assert!(lookup7.is_err());
     match lookup7.err().unwrap() {
-        Error::Application(err) => {
-            assert_eq!(err.message, "NFSERR_NOENT: No Such File or Directory")
-        }
+        Error::Application(err) => assert_eq!(err.message, NFSERR_NOENT),
         _ => assert!(false),
     }
 
     assert!(lookup8.is_err());
     match lookup8.err().unwrap() {
-        Error::Application(err) => {
-            assert_eq!(err.message, "NFSERR_NOENT: No Such File or Directory")
-        }
+        Error::Application(err) => assert_eq!(err.message, NFSERR_NOENT),
         _ => assert!(false),
     }
 
@@ -156,15 +186,67 @@ fn test_nfs_lookup() {
     assert_eq!(lookup4.file.fid, 4);
     assert_eq!(lookup5.file.fid, 5);
 
-    assert_eq!(lookup1.attributes.size, 2048);
-    assert_eq!(lookup2.attributes.size, 2048);
+    // For the two files
     assert_eq!(lookup3.attributes.size, 0);
     assert_eq!(lookup4.attributes.size, 0);
-    assert_eq!(lookup5.attributes.size, 2048);
 
     assert_eq!(lookup1.attributes.fid, 1);
     assert_eq!(lookup2.attributes.fid, 2);
     assert_eq!(lookup3.attributes.fid, 3);
     assert_eq!(lookup4.attributes.fid, 4);
     assert_eq!(lookup5.attributes.fid, 5);
+
+    assert_eq!(lookup1.attributes.type_, ZipFtype::NFDIR);
+    assert_eq!(lookup2.attributes.type_, ZipFtype::NFDIR);
+    assert_eq!(lookup3.attributes.type_, ZipFtype::NFREG);
+    assert_eq!(lookup4.attributes.type_, ZipFtype::NFREG);
+    assert_eq!(lookup5.attributes.type_, ZipFtype::NFDIR);
+}
+
+#[test]
+fn test_nfs_getattr() {
+    // Create a server
+    let server = ZippynfsServer::new("test_files/test1");
+
+    // LOOKUP a bunch of things
+    let attr1 = server.handle_getattr(ZipFileHandle::new(1)).unwrap();
+    let attr2 = server.handle_getattr(ZipFileHandle::new(2)).unwrap();
+    let attr3 = server.handle_getattr(ZipFileHandle::new(3)).unwrap();
+    let attr4 = server.handle_getattr(ZipFileHandle::new(4)).unwrap();
+    let attr5 = server.handle_getattr(ZipFileHandle::new(5)).unwrap();
+    let attr6 = server.handle_getattr(ZipFileHandle::new(6));
+    let attr7 = server.handle_getattr(ZipFileHandle::new(7));
+    let attr8 = server.handle_getattr(ZipFileHandle::new(8));
+
+    // Correctness
+    assert!(attr6.is_err());
+    match attr6.err().unwrap() {
+        Error::Application(err) => assert_eq!(err.message, NFSERR_STALE),
+        _ => assert!(false),
+    }
+
+    assert!(attr7.is_err());
+    match attr7.err().unwrap() {
+        Error::Application(err) => assert_eq!(err.message, NFSERR_STALE),
+        _ => assert!(false),
+    }
+
+    assert!(attr8.is_err());
+    match attr8.err().unwrap() {
+        Error::Application(err) => assert_eq!(err.message, NFSERR_STALE),
+        _ => assert!(false),
+    }
+
+    // For the two files
+    assert_eq!(attr1.attributes.fid, 1);
+    assert_eq!(attr2.attributes.fid, 2);
+    assert_eq!(attr3.attributes.fid, 3);
+    assert_eq!(attr4.attributes.fid, 4);
+    assert_eq!(attr5.attributes.fid, 5);
+
+    assert_eq!(attr1.attributes.type_, ZipFtype::NFDIR);
+    assert_eq!(attr2.attributes.type_, ZipFtype::NFDIR);
+    assert_eq!(attr3.attributes.type_, ZipFtype::NFREG);
+    assert_eq!(attr4.attributes.type_, ZipFtype::NFREG);
+    assert_eq!(attr5.attributes.type_, ZipFtype::NFDIR);
 }

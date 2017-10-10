@@ -2,6 +2,7 @@
 extern crate thrift;
 
 mod counter;
+mod errors;
 
 #[cfg(test)]
 mod test;
@@ -14,6 +15,7 @@ use std::collections::{HashSet, VecDeque};
 use regex::Regex;
 
 use self::counter::AtomicPersistentUsize;
+use self::errors::*;
 
 use zippyrpc::*;
 
@@ -158,6 +160,63 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
 
         Ok(None)
     }
+
+    /// Get the attributes of the given existing file.
+    ///
+    /// NOTE: This method ASSUMES the file actually exists! So you need to check before
+    /// calling this method!
+    fn fs_get_attr(&self, fpath: PathBuf, fid: u64) -> ZipFattr {
+        // Sanity
+        assert_eq!(
+            fpath.file_name().unwrap().to_str().unwrap(),
+            format!("{}", fid)
+        );
+
+        // Get attributes of the file
+        let fmeta = fpath.metadata().unwrap();
+
+        let size = fmeta.len() as u32;
+        let blocks = (size + (BLOCK_SIZE - 1)) / BLOCK_SIZE;
+
+        let created = if fmeta.created().is_ok() {
+            sys_time_to_zip_time(fmeta.created().unwrap())
+        } else {
+            ZipTimeVal::new(0, 0)
+        };
+        let modified = if fmeta.modified().is_ok() {
+            sys_time_to_zip_time(fmeta.modified().unwrap())
+        } else {
+            ZipTimeVal::new(0, 0)
+        };
+        let accessed = if fmeta.accessed().is_ok() {
+            sys_time_to_zip_time(fmeta.accessed().unwrap())
+        } else {
+            ZipTimeVal::new(0, 0)
+        };
+
+        println!("{:?}", fpath);
+
+        ZipFattr::new(
+            if fpath.is_dir() {
+                ZipFtype::NFDIR
+            } else {
+                ZipFtype::NFREG
+            },
+            0777, // mode
+            1, // number of links
+            0, // uid
+            0, // gid
+            size as i64,
+            BLOCK_SIZE as i64,
+            0, // rdev
+            blocks as i64,
+            0, // fsid
+            fid as i64,
+            accessed,
+            modified,
+            created,
+        )
+    }
 }
 
 impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
@@ -167,7 +226,22 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
     }
 
     fn handle_getattr(&self, fhandle: ZipFileHandle) -> thrift::Result<ZipAttrStat> {
-        Err("Unimplemented".into())
+        info!("Handling GETATTR {:?}", fhandle);
+
+        let fpath = self.fs_find_by_fid(fhandle.fid as usize)?;
+
+        match fpath {
+            Some(fpath) => {
+                debug!("Found file at server path {:?}", fpath);
+                Ok(ZipAttrStat::new(
+                    self.fs_get_attr(fpath, fhandle.fid as u64),
+                ))
+            }
+            None => {
+                debug!("No such file with fid = {}", fhandle.fid);
+                Err(NFSERR_STALE.into())
+            }
+        }
     }
 
     fn handle_setattr(&self, fsargs: ZipSattrArgs) -> thrift::Result<ZipAttrStat> {
@@ -184,7 +258,7 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
 
         // Make sure that directory exists
         if dpath.is_none() {
-            return Err("NFSERR_STALE: Stale file handle".into());
+            return Err(NFSERR_STALE.into());
         }
 
         let dpath = dpath.unwrap();
@@ -198,50 +272,16 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
                 debug!("File \"{}\" with fid = {}", fsargs.filename, fid);
 
                 // Get attributes of the file
-                let fmeta = dpath.join(format!("{}", fid)).metadata().unwrap();
-
-                let size = fmeta.len() as u32;
-                let blocks = (size + (BLOCK_SIZE - 1)) / BLOCK_SIZE;
-
-                let created = if fmeta.created().is_ok() {
-                    sys_time_to_zip_time(fmeta.created().unwrap())
-                } else {
-                    ZipTimeVal::new(0, 0)
-                };
-                let modified = if fmeta.modified().is_ok() {
-                    sys_time_to_zip_time(fmeta.modified().unwrap())
-                } else {
-                    ZipTimeVal::new(0, 0)
-                };
-                let accessed = if fmeta.accessed().is_ok() {
-                    sys_time_to_zip_time(fmeta.accessed().unwrap())
-                } else {
-                    ZipTimeVal::new(0, 0)
-                };
+                let fpath = dpath.join(format!("{}", fid));
 
                 Ok(ZipDirOpRes::new(
                     ZipFileHandle::new(fid as i64),
-                    ZipFattr::new(
-                        ZipFtype::NFREG, // file type
-                        0777, // mode
-                        1, // number of links
-                        0, // uid
-                        0, // gid
-                        size as i64,
-                        BLOCK_SIZE as i64,
-                        0, // rdev
-                        blocks as i64,
-                        0, // fsid
-                        fid as i64,
-                        accessed,
-                        modified,
-                        created,
-                    ),
+                    self.fs_get_attr(fpath, fid as u64),
                 ))
             }
             None => {
                 debug!("File \"{}\" does not exist", fsargs.filename);
-                Err("NFSERR_NOENT: No Such File or Directory".into())
+                Err(NFSERR_NOENT.into())
             }
         }
     }
