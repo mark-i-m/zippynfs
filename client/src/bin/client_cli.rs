@@ -21,7 +21,8 @@ use zippyrpc::{TZippynfsSyncClient, ZipFileHandle, ZipAttrStat, ZipSattrArgs, Zi
 /// to parse command line args.
 enum NfsCommand {
     Null,
-    MkDir(String),
+    MkDir(u64, String), // (did, filename)
+    Lookup(u64, String), // (did, filename)
 }
 
 impl<'a> TryFrom<&'a str> for NfsCommand {
@@ -37,10 +38,23 @@ impl<'a> TryFrom<&'a str> for NfsCommand {
         match parts[0] {
             "NULL" => Ok(NfsCommand::Null),
             "MKDIR" => {
-                if parts.len() < 2 {
-                    Err("Mkdir without new dir name".into())
+                if parts.len() < 3 {
+                    Err("Mkdir without new dir name or parent dir name".into())
                 } else {
-                    Ok(NfsCommand::MkDir(parts[1].to_owned()))
+                    Ok(NfsCommand::MkDir(
+                        parts[1].parse().map_err(|e| format!("{}", e))?,
+                        parts[2].to_owned(),
+                    ))
+                }
+            }
+            "LOOKUP" => {
+                if parts.len() < 3 {
+                    Err("Lookup without parent dir name or lookup name".into())
+                } else {
+                    Ok(NfsCommand::Lookup(
+                        parts[1].parse().map_err(|e| format!("{}", e))?,
+                        parts[2].to_owned(),
+                    ))
                 }
             }
             _ => Err(format!("Unknown command: {}", value)),
@@ -75,18 +89,12 @@ fn run(server_addr: &str, command: NfsCommand) -> Result<(), String> {
             Ok(())
         }
 
-        NfsCommand::MkDir(new_dir) => {
-            println!("Executing Mkdir {}", new_dir);
+        NfsCommand::MkDir(did, new_dir) => {
+            println!("Executing Mkdir {} {}", did, new_dir);
 
             // Create the RPC arguments
             let args = ZipCreateArgs::new(
-                ZipDirOpArgs::new(
-                    ZipFileHandle::new(
-                        // TODO: how do get the parent FH?
-                        0, // fid
-                    ),
-                    new_dir,
-                ),
+                ZipDirOpArgs::new(ZipFileHandle::new(did as i64), new_dir),
                 ZipSattr::new(
                     0777, // mode
                     0, // uid
@@ -104,6 +112,21 @@ fn run(server_addr: &str, command: NfsCommand) -> Result<(), String> {
 
             // Send the RPC
             let res = client.mkdir(args);
+
+            // Check the result
+            println!("Received response: {:?}", res);
+
+            res.map(|_| ()).map_err(|e| format!("{}", e))
+        }
+
+        NfsCommand::Lookup(did, fname) => {
+            println!("Executing Lookup {} {}", did, fname);
+
+            // Create the RPC args
+            let args = ZipDirOpArgs::new(ZipFileHandle::new(did as i64), fname);
+
+            // Send the RPC
+            let res = client.lookup(args);
 
             // Check the result
             println!("Received response: {:?}", res);

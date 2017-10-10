@@ -175,8 +175,12 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
     }
 
     fn handle_lookup(&self, fsargs: ZipDirOpArgs) -> thrift::Result<ZipDirOpRes> {
+        info!("Handling Lookup {:?}", fsargs);
+
         // Find the directory
         let dpath = self.fs_find_by_fid(fsargs.dir.fid as usize)?;
+
+        debug!("Found parent at path {:?}", dpath);
 
         // Make sure that directory exists
         if dpath.is_none() {
@@ -191,6 +195,8 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
         // Return a result
         match fid {
             Some(fid) => {
+                debug!("File \"{}\" with fid = {}", fsargs.filename, fid);
+
                 // Get attributes of the file
                 let fmeta = dpath.join(format!("{}", fid)).metadata().unwrap();
 
@@ -233,7 +239,10 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
                     ),
                 ))
             }
-            None => Err("NFSERR_NOENT: No Such File or Directory".into()),
+            None => {
+                debug!("File \"{}\" does not exist", fsargs.filename);
+                Err("NFSERR_NOENT: No Such File or Directory".into())
+            }
         }
     }
 
