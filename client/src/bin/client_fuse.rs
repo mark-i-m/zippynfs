@@ -5,21 +5,50 @@ extern crate client;
 
 extern crate fuse;
 
+extern crate libc;
+
 use std::process::exit;
 
 use client::new_client;
 
 use std::env;
 
-use fuse::Filesystem;
+use fuse::{FileAttr, FileType, Filesystem, Request, ReplyAttr, ReplyData, ReplyEntry, ReplyDirectory};
 
 use std::path::Path;
-// TODO: Write a test to check validity of the provided path
+
+use libc::{ENOENT, ENOSYS};
+
+use std::ffi::OsStr;
+
 
 struct ZippyFileSystem;
 
 impl Filesystem for ZippyFileSystem {
-    // Add functions we need for our flie system bindings
+    // TODO: Add functions we need for our flie system bindings
+
+    fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
+        println!("lookup(parent={}, name={:?})", parent, name);
+        reply.error(ENOSYS)
+    }
+
+    fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
+
+        println!("getattr(ino={})", ino);
+        reply.error(ENOSYS)
+    }
+
+    fn read(&mut self, _req: &Request, ino: u64, _fh: u64, offset: u64, _size: u32, reply: ReplyData) {
+
+        println!("read(ino={}, _fh={}, off={}, _size={})", ino, _fh, offset, _size);
+        reply.error(ENOSYS)
+    }
+
+    fn readdir(&mut self, _req: &Request, ino: u64, _fh: u64, offset: u64, mut reply: ReplyDirectory) {
+        println!("readdir(ino={}, _fh={}, off={}", ino, _fh, offset);
+        reply.error(ENOSYS)
+    }
+
 }
 
 // Checks if the given address is a valid IP Addr
