@@ -10,6 +10,7 @@ mod test;
 use std::fs::{create_dir, read_dir, remove_dir, remove_file, File};
 use std::io::{Error, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::{HashSet, VecDeque};
 
@@ -37,6 +38,19 @@ fn sys_time_to_zip_time(sys_time: SystemTime) -> ZipTimeVal {
 pub struct ZippynfsServer<'a, P: AsRef<Path>> {
     data_dir: P,
     counter: AtomicPersistentUsize<'a>,
+
+    // We need to be sure that no two files in the system have exactly the same path, so for the
+    // time until a file is created (or renamed) that name must be inserted into this set. The
+    // procedure is as follows (to insert a file called "foo" into directory with fid=3):
+    //
+    // 1. Grab the locked set
+    // 2. Insert /path/to/fs/0/3/foo to set
+    // 3. Release lock on set
+    // 4. Do FS stuff to create the file
+    // 5. Grab the locked set
+    // 6. Remove our entry from the set
+    // 7. Release the lock
+    name_lock: Mutex<HashSet<PathBuf>>,
 }
 
 impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
@@ -47,7 +61,11 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
             .unwrap();
 
         // Create the struct
-        ZippynfsServer { data_dir, counter }
+        ZippynfsServer {
+            data_dir,
+            counter,
+            name_lock: Mutex::new(HashSet::new()),
+        }
     }
 
     /// A helper for `fs_find_by_fid`, which returns the named and numbered files in
@@ -426,6 +444,10 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
     }
 
     fn handle_rename(&self, fsargs: ZipRenameArgs) -> thrift::Result<()> {
+        info!("Handling Rename");
+
+        // TODO: how do we make this atomic?
+
         Err("Unimplemented".into())
     }
 
