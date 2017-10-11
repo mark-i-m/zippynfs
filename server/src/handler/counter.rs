@@ -33,7 +33,7 @@ impl<'a> AtomicPersistentUsize<'a> {
     }
 
     /// Atomically fetch the value of the counter and add 1. Then flush to disk.
-    pub fn fetch_inc(&mut self) -> usize {
+    pub fn fetch_inc(&self) -> usize {
         // NOTE: We must lock before fetch_add because the counter inc and the flush
         // need to happen atomically.
         // This is important for persistance on disk especially for

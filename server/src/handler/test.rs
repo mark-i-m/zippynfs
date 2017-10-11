@@ -79,20 +79,74 @@ fn fake_create_args(did: i64, filename: &str) -> ZipCreateArgs {
 
 #[test]
 fn test_atomic_persistent_usize() {
-    run_with_clone_fs("test_files/test1", true, |fspath| {
-        println!("{:?}", fspath.join("counter"));
-        let mut counter = AtomicPersistentUsize::from_file(fspath.join("counter")).unwrap();
-        println!("{:?}", counter);
-        // TODO: not passing
+    run_with_clone_fs("test_files/test1", false, |fspath| {
+        {
+            let counter = AtomicPersistentUsize::from_file(fspath.join("counter")).unwrap();
 
-        assert_eq!(counter.fetch_inc(), 0);
-        assert_eq!(counter.fetch_inc(), 1);
-        assert_eq!(counter.fetch_inc(), 2);
-        assert_eq!(counter.fetch_inc(), 3);
-        assert_eq!(counter.fetch_inc(), 4);
-        assert_eq!(counter.fetch_inc(), 5);
-     //   assert_eq!(counter.fetch_inc(), 9);
-     //   assert_eq!(counter.fetch_inc(), 10);
+            assert_eq!(counter.fetch_inc(), 8);
+            assert_eq!(counter.fetch_inc(), 9);
+            assert_eq!(counter.fetch_inc(), 10);
+            assert_eq!(counter.fetch_inc(), 11);
+            assert_eq!(counter.fetch_inc(), 12);
+        } // Close file
+
+        {
+            let counter = AtomicPersistentUsize::from_file(fspath.join("counter")).unwrap();
+
+            assert_eq!(counter.fetch_inc(), 13);
+            assert_eq!(counter.fetch_inc(), 14);
+            assert_eq!(counter.fetch_inc(), 15);
+            assert_eq!(counter.fetch_inc(), 16);
+            assert_eq!(counter.fetch_inc(), 17);
+        } // Close file
+    })
+}
+
+#[test]
+fn test_atomic_persistent_usize_concurrent() {
+    use std::sync::Arc;
+    use std::thread;
+
+    run_with_clone_fs("test_files/test1", true, |fspath| {
+        const NTHREADS: usize = 1000;
+
+        let counter = Arc::new(
+            AtomicPersistentUsize::from_file(fspath.join("counter")).unwrap(),
+        );
+        let mut children = Vec::with_capacity(NTHREADS);
+        let mut counts = [0xFFFF_FFFF_FFFF_FFFF; NTHREADS];
+
+        // Create a bunch of racing threads
+        for i in 0..NTHREADS {
+            let counter = counter.clone();
+
+            // We know that the indices are mutually exclusive, so this is not a race conditions.
+            // We also know that the main thread will outlive all other threads.
+            //
+            // So this is safe.
+            let count =
+                unsafe { &mut *(counts.get_unchecked_mut(i) as *const usize as *mut usize) };
+
+            children.push(thread::spawn(move || { *count = counter.fetch_inc(); }));
+        }
+
+        // Wait for all threads to exit
+        for child in children {
+            child.join().unwrap();
+        }
+
+        // Correctness
+
+        // Last value is written
+        assert_eq!(counter.fetch_inc(), 1008);
+
+        // Sort values each thread got
+        counts.sort();
+
+        // All children got unique values
+        for i in 0..NTHREADS {
+            assert_eq!(counts[i], i + 8);
+        }
     })
 }
 
@@ -343,7 +397,9 @@ fn test_fs_create_obj() {
         assert!(!fspath.join("0/9.mydir").exists());
 
         // Create a couple of objects
-        let create1 = server.fs_create_obj(fspath.join("0"), "myfile.txt", true).unwrap(); // file
+        let create1 = server
+            .fs_create_obj(fspath.join("0"), "myfile.txt", true)
+            .unwrap(); // file
         //let create2 = server.fs_create_obj(fspath.join("0"), "mydir", false).unwrap(); // dir
         // TODO: uncomment tests and possibly add more after counter works
 
@@ -386,7 +442,7 @@ fn test_nfs_mkdir() {
 
 #[test]
 fn test_fs_delete_obj() {
-    run_with_clone_fs("test_files/test1/", false, |fspath| {
+    run_with_clone_fs("test_files/test1/", true, |fspath| {
         // Do some cleanup (to get around git hackery)
         cleanup_git_hackery_test1(fspath);
 
