@@ -136,6 +136,7 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
     fn fs_find_by_name(&self, path: PathBuf, fname: &str) -> Result<Option<usize>, String> {
         // Sanity
         assert!(fname.len() > 0);
+        assert!(path.is_dir());
 
         // Compile regex to check if a filename is a numbered file
         let re_is_name = Regex::new(r"^\d+$").unwrap();
@@ -336,6 +337,11 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
 
         let dpath = dpath.unwrap();
 
+        // Make sure dpath is a directory
+        if !dpath.is_dir() {
+            return Err(NFSERR_NOTDIR.into());
+        }
+
         // Lookup the file in the directory
         let fid = self.fs_find_by_name(dpath.clone(), &fsargs.filename)?;
 
@@ -386,6 +392,11 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
 
         let dpath = dpath.unwrap();
 
+        // Make sure dpath is a directory
+        if !dpath.is_dir() {
+            return Err(NFSERR_NOTDIR.into());
+        }
+
         // Lookup the file in the directory
         let fid = self.fs_find_by_name(dpath.clone(), &fsargs.filename)?;
 
@@ -435,6 +446,11 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
         let dpath = dpath.unwrap();
         let filename = &fsargs.where_.filename;
 
+        // Make sure dpath is a directory
+        if !dpath.is_dir() {
+            return Err(NFSERR_NOTDIR.into());
+        }
+
         // Lookup the file in the directory
         let old_fid = self.fs_find_by_name(dpath.clone(), filename)?;
 
@@ -475,6 +491,11 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
         }
 
         let dpath = dpath.unwrap();
+
+        // Make sure dpath is a directory
+        if !dpath.is_dir() {
+            return Err(NFSERR_NOTDIR.into());
+        }
 
         // Lookup the file in the directory
         let fid = self.fs_find_by_name(dpath.clone(), &fsargs.filename)?;

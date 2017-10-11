@@ -20,6 +20,7 @@ use zippyrpc::*;
 enum NfsCommand {
     Null,
     MkDir(u64, String), // (did, filename)
+    Remove(u64, String), // (did, filename)
     RmDir(u64, String), // (did, filename)
     Lookup(u64, String), // (did, filename)
 }
@@ -51,6 +52,16 @@ impl<'a> TryFrom<&'a str> for NfsCommand {
                     Err("Rmdir without new dir name or parent dir name".into())
                 } else {
                     Ok(NfsCommand::RmDir(
+                        parts[1].parse().map_err(|e| format!("{}", e))?,
+                        parts[2].to_owned(),
+                    ))
+                }
+            }
+            "REMOVE" => {
+                if parts.len() < 3 {
+                    Err("Remove without new dir name or parent dir name".into())
+                } else {
+                    Ok(NfsCommand::Remove(
                         parts[1].parse().map_err(|e| format!("{}", e))?,
                         parts[2].to_owned(),
                     ))
@@ -136,6 +147,21 @@ fn run(server_addr: &str, command: NfsCommand) -> Result<(), String> {
 
             // Send the RPC
             let res = client.lookup(args);
+
+            // Check the result
+            println!("Received response: {:?}", res);
+
+            res.map(|_| ()).map_err(|e| format!("{}", e))
+        }
+
+        NfsCommand::Remove(did, fname) => {
+            println!("Executing Remove {} {}", did, fname);
+
+            // Create the RPC args
+            let args = ZipDirOpArgs::new(ZipFileHandle::new(did as i64), fname);
+
+            // Send the RPC
+            let res = client.remove(args);
 
             // Check the result
             println!("Received response: {:?}", res);
