@@ -21,8 +21,6 @@ where
 {
     use std::fs::remove_file;
 
-    println!("{:?}", (&fspath).as_ref().join("0/5/32.empty"));
-
     remove_file((&fspath).as_ref().join("0/5/32.empty")).unwrap();
     remove_file((&fspath).as_ref().join("0/6/33.empty")).unwrap();
 }
@@ -307,6 +305,10 @@ fn test_nfs_getattr() {
 
 #[test]
 fn test_fs_delete_obj() {
+    fn fake_dir_op_args(did: i64, filename: &str) -> ZipDirOpArgs {
+        ZipDirOpArgs::new(ZipFileHandle::new(did), filename.to_owned())
+    }
+
     run_with_clone_fs("test_files/test1/", false, |fspath| {
         // Do some cleanup (to get around git hackery)
         cleanup_git_hackery_test1(fspath);
@@ -315,9 +317,27 @@ fn test_fs_delete_obj() {
         let server = ZippynfsServer::new(fspath);
 
         // Delete a couple of items
-        let del4 = server.fs_delete_obj(fspath.join("0"), 4, "baz.txt", true);
-        let del5 = server.fs_delete_obj(fspath.join("0"), 5, "bazee", true);
+        let del4 = server.fs_delete_obj(fspath.join("0"), 4, "baz.txt", true); // file
+        let del5 = server.fs_delete_obj(fspath.join("0"), 5, "bazee", false); // dir
 
-        // TODO
+        // Correctness
+        assert_eq!(del4, Ok(()));
+        assert_eq!(del5, Ok(()));
+
+        // Check that they no longer exist
+        let lookup4 = server.handle_lookup(fake_dir_op_args(0, "baz.txt"));
+        let lookup5 = server.handle_lookup(fake_dir_op_args(0, "bazee"));
+
+        assert!(lookup4.is_err());
+        match lookup4.err().unwrap() {
+            Error::Application(err) => assert_eq!(err.message, NFSERR_NOENT),
+            _ => assert!(false),
+        }
+
+        assert!(lookup5.is_err());
+        match lookup5.err().unwrap() {
+            Error::Application(err) => assert_eq!(err.message, NFSERR_NOENT),
+            _ => assert!(false),
+        }
     })
 }

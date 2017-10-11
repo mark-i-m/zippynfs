@@ -251,7 +251,7 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
     ) -> Result<(), String> {
         // Get the path of the file itself
         let fpath_numbered = dpath.join(format!("{}", fid));
-        let fpath_named = dpath.join(fname);
+        let fpath_named = dpath.join(format!("{}.{}", fid, fname));
 
         // Remove named file
         if is_file {
@@ -259,7 +259,7 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
         } else {
             // The directory must be empty, so if we can get any dir entries,
             // return an error.
-            if fpath_named.read_dir().unwrap().next().is_some() {
+            if fpath_numbered.read_dir().unwrap().next().is_some() {
                 return Err(NFSERR_NOTEMPTY.into());
             }
 
