@@ -219,6 +219,10 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
         )
     }
 
+    /// Create the filesystem object in the given directory and increment counter
+    ///
+    /// NOTE: This method ASSUMES the file does not exist! So you need to check before
+    /// calling this method!
     fn fs_create_obj(
         &self,
         path: PathBuf,
@@ -230,11 +234,19 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
         let numbered_path = path.join(fid.to_string());
         let named_path = path.join(format!("{}.{}", fid, fname));
 
-        create_dir(&numbered_path);
+        // Create numbered file or directory and flush
+        if is_file {
+            File::create(&numbered_path)?;
+        } else {
+            create_dir(&numbered_path)?;
+        }
         // TODO: flush
+
+        // Create named file and flush
         File::create(&named_path)?;
         // TODO: flush
 
+        // Done
         Ok((fid, numbered_path))
     }
 
@@ -386,7 +398,7 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
         let filename = &fsargs.where_.filename;
 
         // Lookup the file in the directory
-        let old_fid = self.fs_find_by_name(dpath.clone(), &fsargs.where_.filename)?;
+        let old_fid = self.fs_find_by_name(dpath.clone(), filename)?;
 
         // Return a result
         // TODO: fix race condition on filename using HashSet and Mutex

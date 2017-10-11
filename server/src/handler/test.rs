@@ -12,6 +12,8 @@ use thrift::Error;
 
 use zippyrpc::*;
 
+use super::AtomicPersistentUsize;
+
 use super::ZippynfsServer;
 use super::errors::*;
 
@@ -63,6 +65,27 @@ where
     if clean_after {
         remove_dir_all(new_clone).unwrap();
     }
+}
+
+fn fake_dir_op_args(did: i64, filename: &str) -> ZipDirOpArgs {
+    ZipDirOpArgs::new(ZipFileHandle::new(did), filename.to_owned())
+}
+
+fn fake_create_args(did: i64, filename: &str) -> ZipCreateArgs {
+    let where_ = fake_dir_op_args(did, &filename);
+    let attributes = ZipSattr::new(0, 0, 0, ZipTimeVal::new(0, 0), ZipTimeVal::new(0, 0));
+    ZipCreateArgs::new(where_, attributes)
+}
+
+#[test]
+fn test_atomic_persistent_usize() {
+    run_with_clone_fs("test_files/test1", true, |fspath| {
+        let mut counter = AtomicPersistentUsize::from_file(fspath.join("counter")).unwrap();
+        // TODO: not passing
+        assert_eq!(counter.fetch_inc(), 8);
+        assert_eq!(counter.fetch_inc(), 9);
+        assert_eq!(counter.fetch_inc(), 10);
+    })
 }
 
 #[test]
@@ -199,10 +222,6 @@ fn test_fs_get_attr() {
 
 #[test]
 fn test_nfs_lookup() {
-    fn fake_dir_op_args(did: i64, filename: &str) -> ZipDirOpArgs {
-        ZipDirOpArgs::new(ZipFileHandle::new(did), filename.to_owned())
-    }
-
     // Create a server
     let server = ZippynfsServer::new("test_files/test1");
 
@@ -304,11 +323,61 @@ fn test_nfs_getattr() {
 }
 
 #[test]
-fn test_fs_delete_obj() {
-    fn fake_dir_op_args(did: i64, filename: &str) -> ZipDirOpArgs {
-        ZipDirOpArgs::new(ZipFileHandle::new(did), filename.to_owned())
-    }
+fn test_fs_create_obj() {
+    run_with_clone_fs("test_files/test1/", true, |fspath| {
+        // Create a server
+        let server = ZippynfsServer::new(fspath);
 
+        // Check that objects do not exist
+        assert!(!fspath.join("0/8").exists());
+        assert!(!fspath.join("0/8.myfile.txt").exists());
+        assert!(!fspath.join("0/9").exists());
+        assert!(!fspath.join("0/9.mydir").exists());
+
+        // Create a couple of objects
+        let create1 = server.fs_create_obj(fspath.join("0"), "myfile.txt", true).unwrap(); // file
+        //let create2 = server.fs_create_obj(fspath.join("0"), "mydir", false).unwrap(); // dir
+        // TODO: uncomment tests and possibly add more after counter works
+
+        // Correctness
+        assert_eq!(create1, (8, fspath.join("0/8")));
+        //assert_eq!(create2, (9, fspath.join("0/9")));
+
+        // Check that they exist
+        assert!(fspath.join("0/8").exists());
+        assert!(fspath.join("0/8").is_file());
+        assert!(fspath.join("0/8.myfile.txt").exists());
+        assert!(fspath.join("0/8.myfile.txt").is_file());
+        //assert!(fspath.join("0/9").exists());
+        //assert!(fspath.join("0/9").is_dir());
+        //assert!(fspath.join("0/9.mydir").exists());
+        //assert!(fspath.join("0/9.mydir").is_file());
+    })
+}
+
+#[test]
+fn test_nfs_mkdir() {
+    // Create a server
+    run_with_clone_fs("test_files/test1", true, |fspath| {
+        let server = ZippynfsServer::new(fspath);
+
+        // Call MKDIR repeatedly
+        let mkdir1 = server.handle_mkdir(fake_create_args(0, "mydir")).unwrap();
+        let mkdir2 = server.handle_mkdir(fake_create_args(0, "foo"));
+        // TODO: add more tests after counter works
+
+        // Correctness
+        assert_eq!(mkdir1.file.fid, 8);
+        assert!(mkdir2.is_err());
+        match mkdir2.err().unwrap() {
+            Error::Application(err) => assert_eq!(err.message, NFSERR_EXIST),
+            _ => assert!(false),
+        }
+    })
+}
+
+#[test]
+fn test_fs_delete_obj() {
     run_with_clone_fs("test_files/test1/", false, |fspath| {
         // Do some cleanup (to get around git hackery)
         cleanup_git_hackery_test1(fspath);
