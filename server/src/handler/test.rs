@@ -400,7 +400,9 @@ fn test_fs_create_obj() {
         let create1 = server
             .fs_create_obj(fspath.join("0"), "myfile.txt", true)
             .unwrap(); // file
-        let create2 = server.fs_create_obj(fspath.join("0"), "mydir", false).unwrap(); // dir
+        let create2 = server
+            .fs_create_obj(fspath.join("0"), "mydir", false)
+            .unwrap(); // dir
         // TODO: possibly add more tests
 
         // Correctness
@@ -469,6 +471,96 @@ fn test_fs_delete_obj() {
 
         assert!(lookup5.is_err());
         match lookup5.err().unwrap() {
+            Error::Application(err) => assert_eq!(err.message, NFSERR_NOENT),
+            _ => assert!(false),
+        }
+    })
+}
+
+#[test]
+fn test_nfs_rmdir() {
+    run_with_clone_fs("test_files/test1", true, |fspath| {
+        // Do some cleanup (to get around git hackery)
+        cleanup_git_hackery_test1(fspath);
+
+        // Create a server
+        let server = ZippynfsServer::new(fspath);
+
+        // Call RMDIR
+        let rmdir1 = server.handle_rmdir(fake_dir_op_args(0, "foo"));
+        let rmdir3 = server.handle_rmdir(fake_dir_op_args(2, "zee.txt"));
+        let _rmdir5 = server.handle_rmdir(fake_dir_op_args(0, "bazee")).unwrap();
+        let rmdir8 = server.handle_rmdir(fake_dir_op_args(0, "baz"));
+
+        // Correctness
+        assert!(rmdir1.is_err());
+        match rmdir1.err().unwrap() {
+            Error::Application(err) => assert_eq!(err.message, NFSERR_NOTEMPTY),
+            _ => assert!(false),
+        }
+
+        assert!(rmdir3.is_err());
+        match rmdir3.err().unwrap() {
+            Error::Application(err) => assert_eq!(err.message, NFSERR_NOTDIR),
+            _ => assert!(false),
+        }
+
+        assert!(rmdir8.is_err());
+        match rmdir8.err().unwrap() {
+            Error::Application(err) => assert_eq!(err.message, NFSERR_NOENT),
+            _ => assert!(false),
+        }
+
+        // Make sure it is actually deleted
+        let lookup5 = server.handle_lookup(fake_dir_op_args(0, "bazee"));
+        assert!(lookup5.is_err());
+        match lookup5.err().unwrap() {
+            Error::Application(err) => assert_eq!(err.message, NFSERR_NOENT),
+            _ => assert!(false),
+        }
+    })
+}
+
+#[test]
+fn test_nfs_remove() {
+    run_with_clone_fs("test_files/test1", true, |fspath| {
+        // Do some cleanup (to get around git hackery)
+        cleanup_git_hackery_test1(fspath);
+
+        // Create a server
+        let server = ZippynfsServer::new(fspath);
+
+        // Call RMDIR
+        let rm1 = server.handle_remove(fake_dir_op_args(0, "foo"));
+        let _rm3 = server
+            .handle_remove(fake_dir_op_args(2, "zee.txt"))
+            .unwrap();
+        let rm5 = server.handle_remove(fake_dir_op_args(0, "bazee"));
+        let rm8 = server.handle_remove(fake_dir_op_args(0, "baz"));
+
+        // Correctness
+        assert!(rm1.is_err());
+        match rm1.err().unwrap() {
+            Error::Application(err) => assert_eq!(err.message, NFSERR_ISDIR),
+            _ => assert!(false),
+        }
+
+        assert!(rm5.is_err());
+        match rm5.err().unwrap() {
+            Error::Application(err) => assert_eq!(err.message, NFSERR_ISDIR),
+            _ => assert!(false),
+        }
+
+        assert!(rm8.is_err());
+        match rm8.err().unwrap() {
+            Error::Application(err) => assert_eq!(err.message, NFSERR_NOENT),
+            _ => assert!(false),
+        }
+
+        // Make sure it is actually deleted
+        let lookup3 = server.handle_lookup(fake_dir_op_args(2, "zee.txt"));
+        assert!(lookup3.is_err());
+        match lookup3.err().unwrap() {
             Error::Application(err) => assert_eq!(err.message, NFSERR_NOENT),
             _ => assert!(false),
         }

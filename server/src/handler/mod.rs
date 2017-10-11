@@ -372,7 +372,46 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
     }
 
     fn handle_remove(&self, fsargs: ZipDirOpArgs) -> thrift::Result<()> {
-        Err("Unimplemented".into())
+        info!("Handling REMOVE {:?}", fsargs);
+
+        // Find the directory
+        let dpath = self.fs_find_by_fid(fsargs.dir.fid as usize)?;
+
+        debug!("Found parent at path {:?}", dpath);
+
+        // Make sure that directory exists
+        if dpath.is_none() {
+            return Err(NFSERR_STALE.into());
+        }
+
+        let dpath = dpath.unwrap();
+
+        // Lookup the file in the directory
+        let fid = self.fs_find_by_name(dpath.clone(), &fsargs.filename)?;
+
+        match fid {
+            Some(fid) => {
+                debug!("File \"{}\" with fid = {}", fsargs.filename, fid);
+
+                // should make sure that it is a file
+                if dpath.join(format!("{}", fid)).is_dir() {
+                    Err(NFSERR_ISDIR.into())
+                } else {
+                    // Remove the object
+                    self.fs_delete_obj(
+                        dpath,
+                        fid as u64,
+                        &fsargs.filename,
+                        true,
+                    )?;
+                    Ok(())
+                }
+            }
+            None => {
+                debug!("File \"{}\" does not exist", fsargs.filename);
+                Err(NFSERR_NOENT.into())
+            }
+        }
     }
 
     fn handle_rename(&self, fsargs: ZipRenameArgs) -> thrift::Result<()> {
@@ -410,11 +449,7 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
                 // TODO: generation numbers?
 
                 // Create a new directory
-                let (new_fid, numbered_path) = self.fs_create_obj(
-                    dpath,
-                    filename,
-                    true,
-                )?;
+                let (new_fid, numbered_path) = self.fs_create_obj(dpath, filename, true)?;
 
                 // TODO: set attributes using fsargs.attributes
 
