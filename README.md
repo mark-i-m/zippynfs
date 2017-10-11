@@ -24,6 +24,13 @@ make install
 
 For more info about building Thrift, [look here](https://thrift.apache.org/docs/BuildingFromSource).
 
+For mounting tthe client you will need to install libfuse, [look here](http://fuse.sourceforge.net/).
+
+For Ubuntu you need to do the following:
+```sh
+sudo apt install libfuse-dev
+```
+
 After this, you should be able to use `cargo` to build and run:
 
 ```sh

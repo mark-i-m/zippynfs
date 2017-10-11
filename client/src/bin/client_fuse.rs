@@ -3,6 +3,8 @@ extern crate clap;
 
 extern crate client;
 
+extern crate fuse;
+
 use std::process::exit;
 
 use client::new_client;
