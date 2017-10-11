@@ -9,6 +9,20 @@ use std::process::exit;
 
 use client::new_client;
 
+use std::env;
+
+use fuse::Filesystem;
+
+use std::path::Path;
+// TODO: Write a test to check validity of the provided path
+
+struct ZippyFileSystem;
+
+impl Filesystem for ZippyFileSystem {
+    // Add functions we need for our flie system bindings
+}
+
+// Checks if the given address is a valid IP Addr
 fn is_addr(arg: String) -> Result<(), String> {
     use std::net::ToSocketAddrs;
 
@@ -23,21 +37,32 @@ fn main() {
             (version: "1.0")
             (author: "Team Chimney")
             (about: "Client for ZippyNFS for Testing")
-            (@arg server: -s --server {is_addr} +required +takes_value "The \"IP:Port\" address of the server")
+            (@arg server: -s --server {is_addr} +required +takes_value "\"IPAddr:Port\" for server")
+            (@arg mount: -m --mount +required +takes_value "The mount path for the nfs client")
     }.get_matches();
 
     // Get the server address
     let server_addr = matches.value_of("server").unwrap();
 
-    if let Err(e) = run(server_addr) {
+    let mnt_path = matches.value_of("mount").unwrap();
+
+    if let Err(e) = run(server_addr, mnt_path) {
         println!("Error! {}", e);
         exit(-1);
     }
+
 }
 
-fn run(server_addr: &str) -> Result<(), String> {
+fn run(server_addr: &str, mnt_path: &str) -> Result<(), String> {
     // build a rpc client
-    let mut client = new_client(server_addr).map_err(|e| format!("{}", e))?;
+    // let mut client = new_client(server_addr).map_err(|e| format!("{}", e))?;
+
+    // Mount the file system
+    // using spawn_mount method, an additional thread will be started to handle the
+    // mount commands and current thread of execution will work for handling the rpc
+    // setup
+    let mount_path = Path::new(mnt_path);
+    fuse::mount(ZippyFileSystem, &mount_path,&[]).unwrap();
 
     // TODO
 
