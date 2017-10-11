@@ -229,8 +229,7 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
         fname: &str,
         is_file: bool,
     ) -> Result<(Fid, PathBuf), Error> {
-        // TODO: call self.counter.fetch_inc()
-        let fid = 8;
+        let fid = self.counter.fetch_inc();
         let numbered_path = path.join(fid.to_string());
         let named_path = path.join(format!("{}.{}", fid, fname));
 
@@ -419,7 +418,6 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
 
                 // TODO: set attributes using fsargs.attributes
 
-                // TODO
                 Ok(ZipDirOpRes::new(
                     ZipFileHandle::new(new_fid as i64),
                     self.fs_get_attr(numbered_path, new_fid as u64),

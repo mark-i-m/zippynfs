@@ -400,22 +400,22 @@ fn test_fs_create_obj() {
         let create1 = server
             .fs_create_obj(fspath.join("0"), "myfile.txt", true)
             .unwrap(); // file
-        //let create2 = server.fs_create_obj(fspath.join("0"), "mydir", false).unwrap(); // dir
-        // TODO: uncomment tests and possibly add more after counter works
+        let create2 = server.fs_create_obj(fspath.join("0"), "mydir", false).unwrap(); // dir
+        // TODO: possibly add more tests
 
         // Correctness
         assert_eq!(create1, (8, fspath.join("0/8")));
-        //assert_eq!(create2, (9, fspath.join("0/9")));
+        assert_eq!(create2, (9, fspath.join("0/9")));
 
         // Check that they exist
         assert!(fspath.join("0/8").exists());
         assert!(fspath.join("0/8").is_file());
         assert!(fspath.join("0/8.myfile.txt").exists());
         assert!(fspath.join("0/8.myfile.txt").is_file());
-        //assert!(fspath.join("0/9").exists());
-        //assert!(fspath.join("0/9").is_dir());
-        //assert!(fspath.join("0/9.mydir").exists());
-        //assert!(fspath.join("0/9.mydir").is_file());
+        assert!(fspath.join("0/9").exists());
+        assert!(fspath.join("0/9").is_dir());
+        assert!(fspath.join("0/9.mydir").exists());
+        assert!(fspath.join("0/9.mydir").is_file());
     })
 }
 
@@ -428,7 +428,7 @@ fn test_nfs_mkdir() {
         // Call MKDIR repeatedly
         let mkdir1 = server.handle_mkdir(fake_create_args(0, "mydir")).unwrap();
         let mkdir2 = server.handle_mkdir(fake_create_args(0, "foo"));
-        // TODO: add more tests after counter works
+        // TODO: add more tests
 
         // Correctness
         assert_eq!(mkdir1.file.fid, 8);
