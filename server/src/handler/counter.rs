@@ -5,6 +5,7 @@ use std::sync::Mutex;
 
 use memmap::{Mmap, Protection};
 
+#[derive(Debug)]
 pub struct AtomicPersistentUsize<'a> {
     counter: &'a AtomicUsize,
     mmap: Mutex<Mmap>,
