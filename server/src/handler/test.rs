@@ -429,12 +429,20 @@ fn test_nfs_mkdir() {
         // Call MKDIR repeatedly
         let mkdir1 = server.handle_mkdir(fake_create_args(0, "mydir")).unwrap();
         let mkdir2 = server.handle_mkdir(fake_create_args(0, "foo"));
+        let mkdir3 = server.handle_mkdir(fake_create_args(2, "zee.txt"));
         // TODO: add more tests
 
         // Correctness
         assert_eq!(mkdir1.file.fid, 8);
+
         assert!(mkdir2.is_err());
         match mkdir2.err().unwrap() {
+            Error::Application(err) => assert_eq!(err.message, NFSERR_EXIST),
+            _ => assert!(false),
+        }
+
+        assert!(mkdir3.is_err());
+        match mkdir3.err().unwrap() {
             Error::Application(err) => assert_eq!(err.message, NFSERR_EXIST),
             _ => assert!(false),
         }
@@ -453,7 +461,6 @@ fn test_mkdir_concurrent() {
     if fspath.exists() {
         remove_dir_all(&fspath).unwrap();
     }
-    let fspath_copy = fspath.clone();
 
     // Populate the new directory
     create_dir(&fspath).unwrap();
@@ -461,13 +468,15 @@ fn test_mkdir_concurrent() {
     create_dir(fspath.join("0")).unwrap();
     File::create(fspath.join("counter"))
         .unwrap()
+
         .write(&[1, 0, 0, 0, 0, 0, 0, 0])
         .unwrap();
 
-    {
-        const NTHREADS: usize = 1000;
+    const NTHREADS: usize = 1000;
 
-        let server = Arc::new(ZippynfsServer::new(fspath));
+    // Create a new scope because server drop interfers with test cleanup
+    {
+        let server = Arc::new(ZippynfsServer::new(fspath.clone()));
         let mut children = Vec::with_capacity(NTHREADS);
 
         // Create a bunch of racing threads
@@ -483,22 +492,19 @@ fn test_mkdir_concurrent() {
             child.join().unwrap();
         }
 
-        // Correctness
-
-        // Only one numbered file and named file got created
-        let mut num_dirs = 0;
-        for i in 0..NTHREADS {
-            let fpath_named = fspath_copy.join(format!("0/{}.mydir", i + 8));
-            let fpath_numbered = fspath_copy.join(format!("0/{}", i + 8));
-            if fpath_named.exists() {
-                assert!(fpath_numbered.exists());
-                num_dirs += 1;
-            } else {
-                assert!(!fpath_numbered.exists());
-            }
-        }
-        assert_eq!(num_dirs, 1);
+        // No checks for correctness
     }
+
+    // Only one numbered file and named file got created
+    assert!(fspath.join("0/1.mydir").exists());
+    assert!(fspath.join("0/1").exists());
+    for i in 2..NTHREADS {
+        assert!(!fspath.join(format!("0/{}.mydir", i)).exists());
+        assert!(!fspath.join(format!("0/{}", i)).exists());
+    }
+
+    // Cleanup afterwards, if needed
+    remove_dir_all(&fspath).unwrap();
 }
 
 #[test]

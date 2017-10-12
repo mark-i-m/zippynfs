@@ -51,7 +51,7 @@ pub struct ZippynfsServer<'a, P: AsRef<Path>> {
     // 5. Grab the locked set
     // 6. Remove our entry from the set
     // 7. Release the lock
-    name_lock: Mutex<HashSet<PathBuf>>,
+    name_lock: Mutex<HashSet<(PathBuf, String)>>,
 }
 
 impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
@@ -506,19 +506,36 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
         let fid = self.fs_find_by_name(dpath.clone(), filename)?;
 
         // Return a result
-        // TODO: fix race condition on filename using HashSet and Mutex
         match fid {
             Some(_) => {
                 debug!("File \"{}\" exists", filename);
                 Err(NFSERR_EXIST.into())
             }
             None => {
-                // TODO: generation numbers?
+                // Value for name_lock
+                let value = (dpath.clone(), filename.clone());
+
+                // Lock filename
+                {
+                    let mut set = self.name_lock.lock().unwrap();
+                    if set.contains(&value) {
+                        return Err(NFSERR_EXIST.into());
+                    }
+                    set.insert(value.clone());
+                    // TODO: flush cache?
+                }
 
                 // Create a new directory
-                let (new_fid, fpath_numbered) = self.fs_create_obj(dpath, filename, true)?;
+                let (new_fid, fpath_numbered) = self.fs_create_obj(dpath, filename, false)?;
 
                 // TODO: set attributes using fsargs.attributes
+
+                // Unlock filename
+                {
+                    let mut set = self.name_lock.lock().unwrap();
+                    set.remove(&value);
+                    // TODO: flush cache?
+                }
 
                 Ok(ZipDirOpRes::new(
                     ZipFileHandle::new(new_fid as i64),
