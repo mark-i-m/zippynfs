@@ -272,6 +272,70 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
         Ok((fid, fpath_numbered))
     }
 
+    /// A helper for `handle_mkdir` and `handle_create`, which creates either a file
+    /// or a directory depending on is_file.
+    fn create_object(&self, fsargs: ZipCreateArgs, is_file: bool) -> thrift::Result<ZipDirOpRes> {
+        // Find the directory
+        let dpath = self.fs_find_by_fid(fsargs.where_.dir.fid as usize)?;
+
+        debug!("Found parent at path {:?}", dpath);
+
+        // Make sure that directory exists
+        if dpath.is_none() {
+            return Err(NFSERR_STALE.into());
+        }
+
+        let dpath = dpath.unwrap();
+        let filename = &fsargs.where_.filename;
+
+        // Make sure dpath is a directory
+        if !dpath.is_dir() {
+            return Err(NFSERR_NOTDIR.into());
+        }
+
+        // Lookup the file in the directory
+        let fid = self.fs_find_by_name(dpath.clone(), filename)?;
+
+        // Return a result
+        match fid {
+            Some(_) => {
+                debug!("File \"{}\" exists", filename);
+                Err(NFSERR_EXIST.into())
+            }
+            None => {
+                // Value for name_lock
+                let value = (dpath.clone(), filename.clone());
+
+                // Lock filename
+                {
+                    let mut set = self.name_lock.lock().unwrap();
+                    if set.contains(&value) {
+                        return Err(NFSERR_EXIST.into());
+                    }
+                    set.insert(value.clone());
+                    // TODO: flush cache?
+                }
+
+                // Create a new directory
+                let (new_fid, fpath_numbered) = self.fs_create_obj(dpath, filename, is_file)?;
+
+                // TODO: set attributes using fsargs.attributes
+
+                // Unlock filename
+                {
+                    let mut set = self.name_lock.lock().unwrap();
+                    set.remove(&value);
+                    // TODO: flush cache?
+                }
+
+                Ok(ZipDirOpRes::new(
+                    ZipFileHandle::new(new_fid as i64),
+                    self.fs_get_attr(fpath_numbered, new_fid as u64),
+                ))
+            }
+        }
+    }
+
     /// Delete the filesystem object in the given directory with the given fid
     ///
     /// NOTE: This method ASSUMES the file actually exists! So you need to check before
@@ -421,7 +485,10 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
     }
 
     fn handle_create(&self, fsargs: ZipCreateArgs) -> thrift::Result<ZipDirOpRes> {
-        Err("Unimplemented".into())
+        info!("Handling CREATE");
+        info!("{:?}", fsargs);
+
+        self.create_object(fsargs, true)
     }
 
     fn handle_remove(&self, fsargs: ZipDirOpArgs) -> thrift::Result<()> {
@@ -481,68 +548,10 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
     }
 
     fn handle_mkdir(&self, fsargs: ZipCreateArgs) -> thrift::Result<ZipDirOpRes> {
-        info!("Handling Mkdir");
+        info!("Handling MKDIR");
         info!("{:?}", fsargs);
 
-        // Find the directory
-        let dpath = self.fs_find_by_fid(fsargs.where_.dir.fid as usize)?;
-
-        debug!("Found parent at path {:?}", dpath);
-
-        // Make sure that directory exists
-        if dpath.is_none() {
-            return Err(NFSERR_STALE.into());
-        }
-
-        let dpath = dpath.unwrap();
-        let filename = &fsargs.where_.filename;
-
-        // Make sure dpath is a directory
-        if !dpath.is_dir() {
-            return Err(NFSERR_NOTDIR.into());
-        }
-
-        // Lookup the file in the directory
-        let fid = self.fs_find_by_name(dpath.clone(), filename)?;
-
-        // Return a result
-        match fid {
-            Some(_) => {
-                debug!("File \"{}\" exists", filename);
-                Err(NFSERR_EXIST.into())
-            }
-            None => {
-                // Value for name_lock
-                let value = (dpath.clone(), filename.clone());
-
-                // Lock filename
-                {
-                    let mut set = self.name_lock.lock().unwrap();
-                    if set.contains(&value) {
-                        return Err(NFSERR_EXIST.into());
-                    }
-                    set.insert(value.clone());
-                    // TODO: flush cache?
-                }
-
-                // Create a new directory
-                let (new_fid, fpath_numbered) = self.fs_create_obj(dpath, filename, false)?;
-
-                // TODO: set attributes using fsargs.attributes
-
-                // Unlock filename
-                {
-                    let mut set = self.name_lock.lock().unwrap();
-                    set.remove(&value);
-                    // TODO: flush cache?
-                }
-
-                Ok(ZipDirOpRes::new(
-                    ZipFileHandle::new(new_fid as i64),
-                    self.fs_get_attr(fpath_numbered, new_fid as u64),
-                ))
-            }
-        }
+        self.create_object(fsargs, false)
     }
 
     fn handle_rmdir(&self, fsargs: ZipDirOpArgs) -> thrift::Result<()> {

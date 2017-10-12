@@ -420,44 +420,41 @@ fn test_fs_create_obj() {
     })
 }
 
-#[test]
-fn test_nfs_mkdir() {
+fn create_object(is_file: bool) {
     // Create a server
     run_with_clone_fs("test_files/test1", true, |fspath| {
         let server = ZippynfsServer::new(fspath);
 
-        // Call MKDIR repeatedly
-        let mkdir1 = server.handle_mkdir(fake_create_args(0, "mydir")).unwrap();
-        let mkdir2 = server.handle_mkdir(fake_create_args(0, "foo"));
-        let mkdir3 = server.handle_mkdir(fake_create_args(2, "zee.txt"));
-        // TODO: add more tests
+        // Call create_object repeatedly
+        let create1 = server.create_object(fake_create_args(0, "myobj"), is_file).unwrap();
+        let create2 = server.create_object(fake_create_args(0, "foo"), is_file);
+        let create3 = server.create_object(fake_create_args(2, "zee.txt"), is_file);
 
         // Correctness
-        assert_eq!(mkdir1.file.fid, 8);
+        assert_eq!(create1.file.fid, 8);
 
-        assert!(mkdir2.is_err());
-        match mkdir2.err().unwrap() {
+        assert!(create2.is_err());
+        match create2.err().unwrap() {
             Error::Application(err) => assert_eq!(err.message, NFSERR_EXIST),
             _ => assert!(false),
         }
 
-        assert!(mkdir3.is_err());
-        match mkdir3.err().unwrap() {
+        assert!(create3.is_err());
+        match create3.err().unwrap() {
             Error::Application(err) => assert_eq!(err.message, NFSERR_EXIST),
             _ => assert!(false),
         }
     })
 }
 
-#[test]
-fn test_mkdir_concurrent() {
+fn create_object_concurrent(is_file: bool) {
     use std::fs::{create_dir, remove_dir_all, File};
     use std::io::Write;
     use std::sync::Arc;
     use std::thread;
 
     // Cleanup after previous attempts
-    let fspath: PathBuf = "test_files/test_mkdir_concurrent".into();
+    let fspath: PathBuf = "test_files/test_create_object_concurrent".into();
     if fspath.exists() {
         remove_dir_all(&fspath).unwrap();
     }
@@ -468,10 +465,10 @@ fn test_mkdir_concurrent() {
     create_dir(fspath.join("0")).unwrap();
     File::create(fspath.join("counter"))
         .unwrap()
-
         .write(&[1, 0, 0, 0, 0, 0, 0, 0])
         .unwrap();
 
+    // If this is 1000, then initial remove_dir_all() or child.join() fail
     const NTHREADS: usize = 1000;
 
     // Create a new scope because server drop interfers with test cleanup
@@ -483,7 +480,7 @@ fn test_mkdir_concurrent() {
         for _ in 0..NTHREADS {
             let server = server.clone();
             children.push(thread::spawn(move || {
-                let _ = server.handle_mkdir(fake_create_args(0, "mydir"));
+                let _ = server.create_object(fake_create_args(0, "myobj"), is_file);
             }));
         }
 
@@ -496,15 +493,35 @@ fn test_mkdir_concurrent() {
     }
 
     // Only one numbered file and named file got created
-    assert!(fspath.join("0/1.mydir").exists());
+    assert!(fspath.join("0/1.myobj").exists());
     assert!(fspath.join("0/1").exists());
     for i in 2..NTHREADS {
-        assert!(!fspath.join(format!("0/{}.mydir", i)).exists());
+        assert!(!fspath.join(format!("0/{}.myobj", i)).exists());
         assert!(!fspath.join(format!("0/{}", i)).exists());
     }
 
     // Cleanup afterwards, if needed
     remove_dir_all(&fspath).unwrap();
+}
+
+#[test]
+fn test_nfs_mkdir() {
+    create_object(false)
+}
+
+#[test]
+fn test_mkdir_concurrent() {
+    create_object_concurrent(false)
+}
+
+#[test]
+fn test_nfs_create() {
+    create_object(true)
+}
+
+#[test]
+fn test_create_concurrent() {
+    create_object_concurrent(true)
 }
 
 #[test]
