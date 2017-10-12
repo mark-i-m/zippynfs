@@ -67,9 +67,16 @@ struct ZipReadRes{
 }
 
 struct ZipReadDirArgs{
+    1: required ZipFileHandle dir;
+}
+
+struct ZipDirEntry {
+    1: required i64 fid;
+    2: required string fname;
 }
 
 struct ZipReadDirRes{
+    1: required list<ZipDirEntry> entries;
 }
 
 struct ZipWriteArgs{
@@ -104,7 +111,7 @@ service Zippynfs {
    void rename(1:ZipRenameArgs fsargs);
    ZipDirOpRes mkdir(1:ZipCreateArgs fsargs);
    void rmdir(1:ZipDirOpArgs fsargs);
-   ZipReadDirRes readdir(1:ZipReadArgs fsargs);
+   ZipReadDirRes readdir(1:ZipReadDirArgs fsargs);
    ZipStatFsRes statfs(1:ZipFileHandle fhandle);
    ZipCommitRes commit(1:ZipCommitArgs fsargs)
 }

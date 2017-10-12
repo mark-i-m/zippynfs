@@ -24,6 +24,7 @@ use zippyrpc::*;
 type Fid = usize;
 
 const BLOCK_SIZE: u32 = 1 << 12; // 4KB
+const NUMBERED_FILE_RE: &'static str = r"^\d+$";
 
 fn sys_time_to_zip_time(sys_time: SystemTime) -> ZipTimeVal {
     let since = sys_time.duration_since(UNIX_EPOCH).unwrap();
@@ -108,7 +109,7 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
         queue.push_back((&self.data_dir).as_ref().join("0"));
 
         // Compile regex to check if a filename is a numbered file
-        let re = Regex::new(r"^\d+$").unwrap();
+        let re = Regex::new(NUMBERED_FILE_RE).unwrap();
 
         // For each iteration of BFS...
         while let Some(path) = queue.pop_front() {
@@ -157,7 +158,7 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
         assert!(path.is_dir());
 
         // Compile regex to check if a filename is a numbered file
-        let re_is_name = Regex::new(r"^\d+$").unwrap();
+        let re_is_name = Regex::new(NUMBERED_FILE_RE).unwrap();
 
         // Compile regex to check if this is the file we want
         let re_is_file = Regex::new(&format!("^(\\d+)\\.{}$", fname)).unwrap();
@@ -308,6 +309,31 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
 
         // Done
         Ok(())
+    }
+
+    /// Get a set of `(fid, name)` for all entries in the given directory.
+    fn fs_read_dir(&self, dpath: PathBuf) -> Result<HashSet<(u64, String)>, String> {
+        let re = Regex::new(NUMBERED_FILE_RE).unwrap();
+        let (numbered_files, named_files) = self.get_numbered_and_named_files(&re, &dpath)?;
+
+        Ok(
+            named_files
+                .into_iter()
+                .map(|fname| {
+                    let mut named_file =
+                        fname.file_name().unwrap().to_str().unwrap().splitn(2, ".");
+                    let number = named_file.next().unwrap();
+                    let name = named_file.next().unwrap();
+
+                    let numbered_file = fname.parent().unwrap().join(number);
+                    (numbered_file, (number.parse().unwrap(), name.to_owned()))
+                })
+                .filter(|&(ref numbered_file, _)| {
+                    numbered_files.contains(numbered_file)
+                })
+                .map(|(_, pair)| pair)
+                .collect(),
+        )
     }
 }
 
@@ -547,8 +573,37 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
         }
     }
 
-    fn handle_readdir(&self, fsargs: ZipReadArgs) -> thrift::Result<ZipReadDirRes> {
-        Err("Unimplemented".into())
+    fn handle_readdir(&self, fsargs: ZipReadDirArgs) -> thrift::Result<ZipReadDirRes> {
+        info!("Handling READDIR {:?}", fsargs);
+
+        // Find the directory
+        let dpath = self.fs_find_by_fid(fsargs.dir.fid as usize)?;
+
+        debug!("Found parent at path {:?}", dpath);
+
+        // Make sure that directory exists
+        if dpath.is_none() {
+            return Err(NFSERR_STALE.into());
+        }
+
+        let dpath = dpath.unwrap();
+
+        // Make sure dpath is a directory
+        if !dpath.is_dir() {
+            return Err(NFSERR_NOTDIR.into());
+        }
+
+        // Get directory contents
+        let contents = self.fs_read_dir(dpath)?;
+
+        debug!("Contents: {:?}", contents);
+
+        Ok(ZipReadDirRes::new(
+            contents
+                .into_iter()
+                .map(|(fid, fname)| ZipDirEntry::new(fid as i64, fname))
+                .collect(),
+        ))
     }
 
     fn handle_statfs(&self, fhandle: ZipFileHandle) -> thrift::Result<ZipStatFsRes> {

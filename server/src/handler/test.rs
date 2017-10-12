@@ -1,5 +1,6 @@
 //! Unit tests for ZippynfsServer
 
+use std::collections::HashSet;
 use std::process::Command;
 #[allow(unused_imports)]
 use std::error::Error as std_err;
@@ -562,6 +563,40 @@ fn test_nfs_remove() {
         assert!(lookup3.is_err());
         match lookup3.err().unwrap() {
             Error::Application(err) => assert_eq!(err.message, NFSERR_NOENT),
+            _ => assert!(false),
+        }
+    })
+}
+
+#[test]
+fn test_nfs_readdir() {
+    run_with_clone_fs("test_files/test1", true, |fspath| {
+        // Do some cleanup (to get around git hackery)
+        cleanup_git_hackery_test1(fspath);
+
+        // Create a server
+        let server = ZippynfsServer::new(fspath);
+
+        // Call RMDIR
+        let readdir0 = server.handle_readdir(ZipReadDirArgs::new(ZipFileHandle::new(0)));
+
+        // Correctness
+        match readdir0 {
+            Ok(ZipReadDirRes { entries }) => {
+                let correct_entries: HashSet<(u64, String)> =
+                    vec![(1, "foo"), (4, "baz.txt"), (5, "bazee")]
+                        .into_iter()
+                        .map(|(fid, fname)| (fid, fname.to_owned()))
+                        .collect();
+
+                let actual_entries = entries
+                    .into_iter()
+                    .map(|ZipDirEntry { fid, fname }| (fid as u64, fname))
+                    .collect();
+
+                // Same set
+                assert_eq!(correct_entries, actual_entries);
+            }
             _ => assert!(false),
         }
     })
