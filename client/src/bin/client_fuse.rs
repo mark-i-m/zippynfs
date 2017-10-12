@@ -3,6 +3,7 @@
 extern crate clap;
 extern crate libc;
 extern crate fuse;
+extern crate time;
 
 extern crate client;
 extern crate zippyrpc;
@@ -16,6 +17,13 @@ use libc::{ENOENT, ENOSYS};
 use std::ffi::{OsStr,OsString};
 use std::string::String;
 use zippyrpc::*;
+use time::Timespec;
+
+const TTL: Timespec = Timespec { sec: 1, nsec: 0 };                     // 1 second
+
+fn to_sys_time( zTime: ZipTimeVal) -> Timespec {
+    Timespec {sec: zTime.seconds, nsec: zTime.useconds as i32 }
+}
 
 struct ZippyFileSystem {
     znfs : ZnfsClient,
@@ -29,9 +37,34 @@ impl Filesystem for ZippyFileSystem {
         let res = self.znfs.lookup(args);
         println!("Lookup response: {:?}", res);
         match res{
-            Ok(lres)=>{
-                // TODO: Pack result reply
-
+            Ok(dopres)=>{
+                let lres =  dopres.attributes;
+                let myTime =  to_sys_time(lres.ctime);
+                let attr : FileAttr =  FileAttr {
+                    ino: lres.fid as u64,
+                    size: lres.size as u64,
+                    blocks: lres.blocks as u64,
+                    atime: to_sys_time(lres.atime),
+                    mtime: to_sys_time(lres.mtime),
+                    ctime: myTime,
+                    crtime: myTime,
+                    kind: match lres.type_ {
+                        ZipFtype::NFREG => FileType::RegularFile,
+                        ZipFtype::NFDIR => FileType::Directory,
+                        ZipFtype::NFNON => FileType::NamedPipe,
+                        ZipFtype::NFBLK => FileType::BlockDevice,
+                        ZipFtype::NFCHR => FileType::CharDevice,
+                        ZipFtype::NFLNK => FileType::Symlink,
+                    },
+                    perm: lres.mode as u16,
+                    nlink: lres.nlink as u32,
+                    uid: lres.uid as u32,
+                    gid: lres.gid as u32,
+                    rdev: lres.rdev as u32,
+                    flags: 0,
+                };
+                reply.entry(&TTL,&attr,0);
+                return;
             }
             Err(e)=>{
                 println!("Lookup error: {:?}", e);
@@ -41,9 +74,46 @@ impl Filesystem for ZippyFileSystem {
     }
 
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
-
         println!("getattr(ino={})", ino);
-        reply.error(ENOSYS)
+        let args = ZipFileHandle::new(ino as i64);
+        let res = self.znfs.getattr(args);
+        println!("Lookup response: {:?}", res);
+        match res{
+            Ok(resattr)=>{
+                let lres =  resattr.attributes;
+                let myTime =  to_sys_time(lres.ctime);
+                let attr : FileAttr =  FileAttr {
+                    ino: lres.fid as u64,
+                    size: lres.size as u64,
+                    blocks: lres.blocks as u64,
+                    atime: to_sys_time(lres.atime),
+                    mtime: to_sys_time(lres.mtime),
+                    ctime: myTime,
+                    crtime: myTime,
+                    kind: match lres.type_ {
+                        ZipFtype::NFREG => FileType::RegularFile,
+                        ZipFtype::NFDIR => FileType::Directory,
+                        ZipFtype::NFNON => FileType::NamedPipe,
+                        ZipFtype::NFBLK => FileType::BlockDevice,
+                        ZipFtype::NFCHR => FileType::CharDevice,
+                        ZipFtype::NFLNK => FileType::Symlink,
+                    },
+                    perm: lres.mode as u16,
+                    nlink: lres.nlink as u32,
+                    uid: lres.uid as u32,
+                    gid: lres.gid as u32,
+                    rdev: lres.rdev as u32,
+                    flags: 0,
+                };
+                reply.attr(&TTL,&attr);
+                return;
+            }
+            Err(e)=>{
+                println!("Lookup error: {:?}", e);
+                reply.error(ENOENT);
+                return;
+            }
+        }
     }
 
     fn read(&mut self, _req: &Request, ino: u64, _fh: u64, offset: u64, _size: u32, reply: ReplyData) {
