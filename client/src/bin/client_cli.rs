@@ -23,6 +23,7 @@ enum NfsCommand {
     Remove(u64, String), // (did, filename)
     RmDir(u64, String), // (did, filename)
     Lookup(u64, String), // (did, filename)
+    ReadDir(u64), // did
 }
 
 impl<'a> TryFrom<&'a str> for NfsCommand {
@@ -74,6 +75,15 @@ impl<'a> TryFrom<&'a str> for NfsCommand {
                     Ok(NfsCommand::Lookup(
                         parts[1].parse().map_err(|e| format!("{}", e))?,
                         parts[2].to_owned(),
+                    ))
+                }
+            }
+            "READDIR" => {
+                if parts.len() < 2 {
+                    Err("Readdir without dir name".into())
+                } else {
+                    Ok(NfsCommand::ReadDir(
+                        parts[1].parse().map_err(|e| format!("{}", e))?,
                     ))
                 }
             }
@@ -177,6 +187,21 @@ fn run(server_addr: &str, command: NfsCommand) -> Result<(), String> {
 
             // Send the RPC
             let res = client.rmdir(args);
+
+            // Check the result
+            println!("Received response: {:?}", res);
+
+            res.map(|_| ()).map_err(|e| format!("{}", e))
+        }
+
+        NfsCommand::ReadDir(did) => {
+            println!("Executing ReadDir {}", did);
+
+            // Create the RPC args
+            let args = ZipReadDirArgs::new(ZipFileHandle::new(did as i64));
+
+            // Send the RPC
+            let res = client.readdir(args);
 
             // Check the result
             println!("Received response: {:?}", res);
