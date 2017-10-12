@@ -169,8 +169,6 @@ fn test_get_numbered_and_named_files() {
     assert_eq!(numbered_files.len(), 4);
     assert_eq!(named_files.len(), 4);
 
-    println!("{:?}", numbered_files);
-
     assert!(numbered_files.contains(
         &Path::new("test_files/test1/0/1").to_path_buf(),
     ));
@@ -461,7 +459,11 @@ fn test_mkdir_concurrent() {
     create_dir(&fspath).unwrap();
     File::create(fspath.join("0.root")).unwrap();
     create_dir(fspath.join("0")).unwrap();
-    File::create(fspath.join("counter")).unwrap().write(&[1, 0, 0, 0, 0, 0, 0, 0]);
+    File::create(fspath.join("counter"))
+        .unwrap()
+        .write(&[1, 0, 0, 0, 0, 0, 0, 0])
+        .unwrap();
+
     {
         const NTHREADS: usize = 1000;
 
@@ -469,10 +471,10 @@ fn test_mkdir_concurrent() {
         let mut children = Vec::with_capacity(NTHREADS);
 
         // Create a bunch of racing threads
-        for i in 0..NTHREADS {
+        for _ in 0..NTHREADS {
             let server = server.clone();
             children.push(thread::spawn(move || {
-                server.handle_mkdir(fake_create_args(0, "mydir"));
+                let _ = server.handle_mkdir(fake_create_args(0, "mydir"));
             }));
         }
 

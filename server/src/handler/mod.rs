@@ -8,7 +8,7 @@ mod errors;
 mod test;
 
 use std::fs::{create_dir, read_dir, remove_dir, remove_file, File};
-use std::io::{Error, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -214,8 +214,6 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
         } else {
             ZipTimeVal::new(0, 0)
         };
-
-        println!("{:?}", fpath);
 
         ZipFattr::new(
             if fpath.is_dir() {
