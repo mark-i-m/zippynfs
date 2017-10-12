@@ -12,6 +12,7 @@ use zippyrpc::ZippynfsSyncClient;
 type ClientInputProtocol = TCompactInputProtocol<TFramedReadTransport<ReadHalf<TTcpChannel>>>;
 type ClientOutputProtocol = TCompactOutputProtocol<TFramedWriteTransport<WriteHalf<TTcpChannel>>>;
 
+pub type ZnfsClient = ZippynfsSyncClient<ClientInputProtocol, ClientOutputProtocol>;
 /// Create a new thrift client communicating with the given server address.
 pub fn new_client(
     server_addr: &str,
