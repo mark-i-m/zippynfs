@@ -444,6 +444,62 @@ fn test_nfs_mkdir() {
 }
 
 #[test]
+fn test_mkdir_concurrent() {
+    use std::fs::{create_dir, remove_dir_all, File};
+    use std::io::Write;
+    use std::sync::Arc;
+    use std::thread;
+
+    // Cleanup after previous attempts
+    let fspath: PathBuf = "test_files/test_mkdir_concurrent".into();
+    if fspath.exists() {
+        remove_dir_all(&fspath).unwrap();
+    }
+    let fspath_copy = fspath.clone();
+
+    // Populate the new directory
+    create_dir(&fspath).unwrap();
+    File::create(fspath.join("0.root")).unwrap();
+    create_dir(fspath.join("0")).unwrap();
+    File::create(fspath.join("counter")).unwrap().write(&[1, 0, 0, 0, 0, 0, 0, 0]);
+    {
+        const NTHREADS: usize = 1000;
+
+        let server = Arc::new(ZippynfsServer::new(fspath));
+        let mut children = Vec::with_capacity(NTHREADS);
+
+        // Create a bunch of racing threads
+        for i in 0..NTHREADS {
+            let server = server.clone();
+            children.push(thread::spawn(move || {
+                server.handle_mkdir(fake_create_args(0, "mydir"));
+            }));
+        }
+
+        // Wait for all threads to exit
+        for child in children {
+            child.join().unwrap();
+        }
+
+        // Correctness
+
+        // Only one numbered file and named file got created
+        let mut num_dirs = 0;
+        for i in 0..NTHREADS {
+            let fpath_named = fspath_copy.join(format!("0/{}.mydir", i + 8));
+            let fpath_numbered = fspath_copy.join(format!("0/{}", i + 8));
+            if fpath_named.exists() {
+                assert!(fpath_numbered.exists());
+                num_dirs += 1;
+            } else {
+                assert!(!fpath_numbered.exists());
+            }
+        }
+        assert_eq!(num_dirs, 1);
+    }
+}
+
+#[test]
 fn test_fs_delete_obj() {
     run_with_clone_fs("test_files/test1/", true, |fspath| {
         // Do some cleanup (to get around git hackery)

@@ -245,28 +245,33 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
     /// calling this method!
     fn fs_create_obj(
         &self,
-        path: PathBuf,
+        dpath: PathBuf,
         fname: &str,
         is_file: bool,
-    ) -> Result<(Fid, PathBuf), Error> {
+    ) -> Result<(Fid, PathBuf), String> {
         let fid = self.counter.fetch_inc();
-        let numbered_path = path.join(fid.to_string());
-        let named_path = path.join(format!("{}.{}", fid, fname));
+        let fpath_numbered = dpath.join(fid.to_string());
+        let fpath_named = dpath.join(format!("{}.{}", fid, fname));
 
-        // Create numbered file or directory and flush
+        // Create numbered file or directory
         if is_file {
-            File::create(&numbered_path)?;
+            File::create(&fpath_numbered).map_err(|e| format!("{}", e))?;
         } else {
-            create_dir(&numbered_path)?;
+            create_dir(&fpath_numbered).map_err(|e| format!("{}", e))?;
         }
-        // TODO: flush
 
-        // Create named file and flush
-        File::create(&named_path)?;
-        // TODO: flush
+        // Flush the directory
+        let mut dir = File::open(dpath).unwrap();
+        dir.flush().map_err(|e| format!("{}", e))?;
+
+        // Create named file
+        File::create(&fpath_named).map_err(|e| format!("{}", e))?;
+
+        // Flush the directory
+        dir.flush().map_err(|e| format!("{}", e))?;
 
         // Done
-        Ok((fid, numbered_path))
+        Ok((fid, fpath_numbered))
     }
 
     /// Delete the filesystem object in the given directory with the given fid
@@ -500,12 +505,12 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
         }
 
         // Lookup the file in the directory
-        let old_fid = self.fs_find_by_name(dpath.clone(), filename)?;
+        let fid = self.fs_find_by_name(dpath.clone(), filename)?;
 
         // Return a result
         // TODO: fix race condition on filename using HashSet and Mutex
-        match old_fid {
-            Some(old_fid) => {
+        match fid {
+            Some(_) => {
                 debug!("File \"{}\" exists", filename);
                 Err(NFSERR_EXIST.into())
             }
@@ -513,13 +518,13 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
                 // TODO: generation numbers?
 
                 // Create a new directory
-                let (new_fid, numbered_path) = self.fs_create_obj(dpath, filename, true)?;
+                let (new_fid, fpath_numbered) = self.fs_create_obj(dpath, filename, true)?;
 
                 // TODO: set attributes using fsargs.attributes
 
                 Ok(ZipDirOpRes::new(
                     ZipFileHandle::new(new_fid as i64),
-                    self.fs_get_attr(numbered_path, new_fid as u64),
+                    self.fs_get_attr(fpath_numbered, new_fid as u64),
                 ))
             }
         }
