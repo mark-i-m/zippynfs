@@ -7,7 +7,7 @@ exclude = ["src/zippynfs.rs"]
 include = ["src/zippynfs.thrift"]
 
 [lib]
-path = "src/zippynfs.rs"
+path = "src/lib.rs"
 
 [dependencies]
 thrift = "0.0.4"

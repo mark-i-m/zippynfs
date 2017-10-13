@@ -426,7 +426,9 @@ fn create_object(is_file: bool) {
         let server = ZippynfsServer::new(fspath);
 
         // Call create_object repeatedly
-        let create1 = server.create_object(fake_create_args(0, "myobj"), is_file).unwrap();
+        let create1 = server
+            .create_object(fake_create_args(0, "myobj"), is_file)
+            .unwrap();
         let create2 = server.create_object(fake_create_args(0, "foo"), is_file);
         let create3 = server.create_object(fake_create_args(2, "zee.txt"), is_file);
 

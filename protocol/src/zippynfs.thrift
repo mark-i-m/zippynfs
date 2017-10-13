@@ -1,5 +1,19 @@
 namespace rs zippy
 
+enum ZipErrorType {
+   NFSERR_NOENT,
+   NFSERR_EXIST,
+   NFSERR_NOTDIR,
+   NFSERR_ISDIR,
+   NFSERR_NOTEMPTY,
+   NFSERR_STALE,
+}
+
+exception ZipException {
+    1: required ZipErrorType error;
+    2: required string message;
+}
+
 struct ZipTimeVal {
     1: required i64 seconds;
     2: required i64 useconds;

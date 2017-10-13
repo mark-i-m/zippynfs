@@ -2,7 +2,6 @@
 extern crate thrift;
 
 mod counter;
-mod errors;
 
 #[cfg(test)]
 mod test;
@@ -16,10 +15,9 @@ use std::collections::{HashSet, VecDeque};
 
 use regex::Regex;
 
-use self::counter::AtomicPersistentUsize;
-use self::errors::*;
-
 use zippyrpc::*;
+
+use self::counter::AtomicPersistentUsize;
 
 type Fid = usize;
 
@@ -282,7 +280,7 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
 
         // Make sure that directory exists
         if dpath.is_none() {
-            return Err(NFSERR_STALE.into());
+            return Err(nfs_error(ZipErrorType::NFSERR_STALE));
         }
 
         let dpath = dpath.unwrap();
@@ -290,7 +288,7 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
 
         // Make sure dpath is a directory
         if !dpath.is_dir() {
-            return Err(NFSERR_NOTDIR.into());
+            return Err(nfs_error(ZipErrorType::NFSERR_NOTDIR));
         }
 
         // Lookup the file in the directory
@@ -300,7 +298,7 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
         match fid {
             Some(_) => {
                 debug!("File \"{}\" exists", filename);
-                Err(NFSERR_EXIST.into())
+                Err(nfs_error(ZipErrorType::NFSERR_EXIST))
             }
             None => {
                 // Value for name_lock
@@ -310,7 +308,7 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
                 {
                     let mut set = self.name_lock.lock().unwrap();
                     if set.contains(&value) {
-                        return Err(NFSERR_EXIST.into());
+                        return Err(nfs_error(ZipErrorType::NFSERR_EXIST));
                     }
                     set.insert(value.clone());
                     // TODO: flush cache?
@@ -346,7 +344,7 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
         fid: u64,
         fname: &str,
         is_file: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), thrift::Error> {
         // Get the path of the file itself
         let fpath_numbered = dpath.join(format!("{}", fid));
         let fpath_named = dpath.join(format!("{}.{}", fid, fname));
@@ -358,7 +356,7 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
             // The directory must be empty, so if we can get any dir entries,
             // return an error.
             if fpath_numbered.read_dir().unwrap().next().is_some() {
-                return Err(NFSERR_NOTEMPTY.into());
+                return Err(nfs_error(ZipErrorType::NFSERR_NOTEMPTY));
             }
 
             remove_dir(fpath_numbered).map_err(|e| format!("{}", e))?;
@@ -424,7 +422,7 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
             }
             None => {
                 debug!("No such file with fid = {}", fhandle.fid);
-                Err(NFSERR_STALE.into())
+                Err(nfs_error(ZipErrorType::NFSERR_STALE))
             }
         }
     }
@@ -443,14 +441,14 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
 
         // Make sure that directory exists
         if dpath.is_none() {
-            return Err(NFSERR_STALE.into());
+            return Err(nfs_error(ZipErrorType::NFSERR_STALE));
         }
 
         let dpath = dpath.unwrap();
 
         // Make sure dpath is a directory
         if !dpath.is_dir() {
-            return Err(NFSERR_NOTDIR.into());
+            return Err(nfs_error(ZipErrorType::NFSERR_NOTDIR));
         }
 
         // Lookup the file in the directory
@@ -471,7 +469,7 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
             }
             None => {
                 debug!("File \"{}\" does not exist", fsargs.filename);
-                Err(NFSERR_NOENT.into())
+                Err(nfs_error(ZipErrorType::NFSERR_NOENT))
             }
         }
     }
@@ -501,14 +499,14 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
 
         // Make sure that directory exists
         if dpath.is_none() {
-            return Err(NFSERR_STALE.into());
+            return Err(nfs_error(ZipErrorType::NFSERR_STALE));
         }
 
         let dpath = dpath.unwrap();
 
         // Make sure dpath is a directory
         if !dpath.is_dir() {
-            return Err(NFSERR_NOTDIR.into());
+            return Err(nfs_error(ZipErrorType::NFSERR_NOTDIR));
         }
 
         // Lookup the file in the directory
@@ -520,7 +518,7 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
 
                 // should make sure that it is a file
                 if dpath.join(format!("{}", fid)).is_dir() {
-                    Err(NFSERR_ISDIR.into())
+                    Err(nfs_error(ZipErrorType::NFSERR_ISDIR))
                 } else {
                     // Remove the object
                     self.fs_delete_obj(
@@ -534,7 +532,7 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
             }
             None => {
                 debug!("File \"{}\" does not exist", fsargs.filename);
-                Err(NFSERR_NOENT.into())
+                Err(nfs_error(ZipErrorType::NFSERR_NOENT))
             }
         }
     }
@@ -564,14 +562,14 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
 
         // Make sure that directory exists
         if dpath.is_none() {
-            return Err(NFSERR_STALE.into());
+            return Err(nfs_error(ZipErrorType::NFSERR_STALE));
         }
 
         let dpath = dpath.unwrap();
 
         // Make sure dpath is a directory
         if !dpath.is_dir() {
-            return Err(NFSERR_NOTDIR.into());
+            return Err(nfs_error(ZipErrorType::NFSERR_NOTDIR));
         }
 
         // Lookup the file in the directory
@@ -583,7 +581,7 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
 
                 // should make sure that it is a dir
                 if !dpath.join(format!("{}", fid)).is_dir() {
-                    Err(NFSERR_NOTDIR.into())
+                    Err(nfs_error(ZipErrorType::NFSERR_NOTDIR))
                 } else {
                     // Remove the object
                     self.fs_delete_obj(
@@ -597,7 +595,7 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
             }
             None => {
                 debug!("File \"{}\" does not exist", fsargs.filename);
-                Err(NFSERR_NOENT.into())
+                Err(nfs_error(ZipErrorType::NFSERR_NOENT))
             }
         }
     }
@@ -612,14 +610,14 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
 
         // Make sure that directory exists
         if dpath.is_none() {
-            return Err(NFSERR_STALE.into());
+            return Err(nfs_error(ZipErrorType::NFSERR_STALE));
         }
 
         let dpath = dpath.unwrap();
 
         // Make sure dpath is a directory
         if !dpath.is_dir() {
-            return Err(NFSERR_NOTDIR.into());
+            return Err(nfs_error(ZipErrorType::NFSERR_NOTDIR));
         }
 
         // Get directory contents
