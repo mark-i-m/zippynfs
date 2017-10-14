@@ -959,8 +959,19 @@ fn test_nfs_write() {
         // Create a server
         let server = ZippynfsServer::new(fspath);
 
-        // Write a file
+        let fpath_numbered = fspath.join("0/1/2/3");
+        let mut file = File::open(&fpath_numbered).unwrap();
+
+        // Read the contents before so we can compare afterwards
+        let mut buf1 = Vec::new();
+        let bytes = file.read_to_end(&mut buf1).unwrap();
+        assert_eq!(bytes, 27);
+
+        // Data to write
         let data = "Hello, World!".as_bytes();
+        assert_eq!(data.len(), 13);
+
+        // Write a file
         let write3 = server
             .handle_write(ZipWriteArgs::new(
                 ZipFileHandle::new(3),
@@ -972,20 +983,29 @@ fn test_nfs_write() {
             .unwrap();
 
         // Correctness
+
+        // Check the return value
         assert_eq!(write3.count as usize, 13);
         assert_eq!(write3.committed, ZipWriteStable::FILE_SYNC);
         assert_eq!(write3.verf, 8); // server epoch
 
         // Check that the write happened
-        assert_eq!(data.len(), 13);
-        let mut buf = [0u8; 13];
-
-        let fpath_numbered = fspath.join("0/1/2/3");
         let mut file = File::open(fpath_numbered).unwrap();
+        assert_eq!(file.metadata().unwrap().len(), buf1.len() as u64);
 
-        assert_eq!(file.metadata().unwrap().len(), data.len() as u64);
+        let mut buf2 = Vec::new();
+        file.read_to_end(&mut buf2).unwrap();
 
-        file.read_exact(&mut buf).unwrap();
-        assert_eq!(buf, data);
+        println!("\n{:?}\n{:?}", buf1, buf2);
+
+        assert_eq!(buf1.len(), buf2.len());
+
+        for i in 0..buf1.len() {
+            if i >= data.len() {
+                assert_eq!(buf1[i], buf2[i]);
+            } else {
+                assert_eq!(buf2[i], data[i]);
+            }
+        }
     })
 }
