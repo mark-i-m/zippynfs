@@ -105,6 +105,8 @@ struct ZipStatFsRes{
 }
 
 struct ZipRenameArgs{
+    1: required ZipDirOpArgs old_loc;
+    2: required ZipDirOpArgs new_loc;
 }
 
 struct ZipCommitArgs{

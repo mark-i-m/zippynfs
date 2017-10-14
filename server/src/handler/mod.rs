@@ -6,7 +6,7 @@ mod counter;
 #[cfg(test)]
 mod test;
 
-use std::fs::{create_dir, read_dir, remove_dir, remove_file, File};
+use std::fs::{create_dir, read_dir, remove_dir, remove_file, rename, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -235,6 +235,35 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
         )
     }
 
+    /// Add the given name to the `name_lock`.
+    ///
+    /// Returns true if the name was locked and false it was already locked.
+    fn lock_name(&self, name: (PathBuf, String)) -> bool {
+        let mut set = self.name_lock.lock().unwrap();
+
+        if set.contains(&name) {
+            return false;
+        }
+
+        set.insert(name);
+        // TODO: flush cache?
+
+        true
+    }
+
+    /// Remove the given name from the `name_lock`
+    ///
+    /// This should always succeed.
+    ///
+    /// NOTE: The burden is on the caller to ensure the name is already in the `name_lock`.
+    /// We will `panic!` otherwise!
+    fn unlock_name(&self, name: &(PathBuf, String)) {
+        let mut set = self.name_lock.lock().unwrap();
+        let present = set.remove(name);
+        assert!(present);
+        // TODO: flush cache?
+    }
+
     /// Create the filesystem object in the given directory and increment counter
     ///
     /// NOTE: This method ASSUMES the file does not exist! So you need to check before
@@ -305,13 +334,8 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
                 let value = (dpath.clone(), filename.clone());
 
                 // Lock filename
-                {
-                    let mut set = self.name_lock.lock().unwrap();
-                    if set.contains(&value) {
-                        return Err(nfs_error(ZipErrorType::NFSERR_EXIST));
-                    }
-                    set.insert(value.clone());
-                    // TODO: flush cache?
+                if !self.lock_name(value.clone()) {
+                    return Err(nfs_error(ZipErrorType::NFSERR_EXIST));
                 }
 
                 // Create a new directory
@@ -320,11 +344,7 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
                 // TODO: set attributes using fsargs.attributes
 
                 // Unlock filename
-                {
-                    let mut set = self.name_lock.lock().unwrap();
-                    set.remove(&value);
-                    // TODO: flush cache?
-                }
+                self.unlock_name(&value);
 
                 Ok(ZipDirOpRes::new(
                     ZipFileHandle::new(new_fid as i64),
@@ -540,9 +560,115 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
     fn handle_rename(&self, fsargs: ZipRenameArgs) -> thrift::Result<()> {
         info!("Handling Rename");
 
-        // TODO: how do we make this atomic?
+        // Find the old directory
+        let old_loc_dpath = self.fs_find_by_fid(fsargs.old_loc.dir.fid as usize)?;
 
-        Err("Unimplemented".into())
+        // Make sure it exists
+        let old_loc_dpath = if let Some(path) = old_loc_dpath {
+            path
+        } else {
+            return Err(nfs_error(ZipErrorType::NFSERR_STALE));
+        };
+
+        // Find the new directory
+        let new_loc_dpath = self.fs_find_by_fid(fsargs.new_loc.dir.fid as usize)?;
+
+        // Make sure it exists
+        let new_loc_dpath = if let Some(path) = new_loc_dpath {
+            path
+        } else {
+            return Err(nfs_error(ZipErrorType::NFSERR_STALE));
+        };
+
+        // Find the file to be moved
+        let fid = self.fs_find_by_name(
+            old_loc_dpath.clone(),
+            &fsargs.old_loc.filename,
+        )?;
+
+        // make sure it exists
+        if fid.is_none() {
+            return Err(nfs_error(ZipErrorType::NFSERR_NOENT));
+        }
+
+        // Lock the name so that after we check we know we have the name
+        if !self.lock_name((new_loc_dpath.clone(), fsargs.new_loc.filename.clone())) {
+            // Could not lock == name already exists (so one else got there first)
+            return Err(nfs_error(ZipErrorType::NFSERR_EXIST));
+        }
+
+        // NOTE: We cannot use `?` until we unlock so as not new_loc cause deadlock!
+
+        // Make sure the given filename does not exist already
+        let already = self.fs_find_by_name(new_loc_dpath.clone(), &fsargs.new_loc.filename);
+
+        // If we have some random error, then unlock
+        if already.is_err() {
+            self.unlock_name(&(new_loc_dpath.clone(), fsargs.new_loc.filename.clone()));
+            return Err(already.err().unwrap().into());
+        }
+
+        // If the name already exists, then unlock
+        if already.ok().unwrap().is_some() {
+            self.unlock_name(&(new_loc_dpath.clone(), fsargs.new_loc.filename.clone()));
+            return Err(nfs_error(ZipErrorType::NFSERR_EXIST));
+        }
+
+        // If we get to this point, we know that we own the name!
+
+        let mut new_loc_dir = File::open(new_loc_dpath.clone()).unwrap();
+
+        let fid = fid.unwrap();
+        let old_loc_fpath_named =
+            old_loc_dpath.join(format!("{}.{}", fid, fsargs.old_loc.filename));
+        let new_loc_fpath_named = new_loc_dpath.clone().join(format!(
+            "{}.{}",
+            fid,
+            fsargs.new_loc.filename.clone()
+        ));
+
+        // Create the new named file
+        let res = File::create(&new_loc_fpath_named);
+        if res.is_err() {
+            self.unlock_name(&(new_loc_dpath.clone(), fsargs.new_loc.filename.clone()));
+            return Err(res.err().unwrap().into());
+        }
+
+        // TODO: attributes
+
+        // Flush the directory
+        let res = new_loc_dir.flush();
+        if res.is_err() {
+            self.unlock_name(&(new_loc_dpath.clone(), fsargs.new_loc.filename.clone()));
+            return Err(res.err().unwrap().into());
+        }
+
+        // Atomic rename numbered file to new location
+        let old_loc_fpath_numbered = old_loc_dpath.join(fid.to_string());
+        let new_loc_fpath_numbered = new_loc_dpath.clone().join(fid.to_string());
+        let res = rename(old_loc_fpath_numbered, new_loc_fpath_numbered);
+        if res.is_err() {
+            self.unlock_name(&(new_loc_dpath.clone(), fsargs.new_loc.filename.clone()));
+            return Err(res.err().unwrap().into());
+        }
+
+        // Flush the directory
+        let res = new_loc_dir.flush();
+        if res.is_err() {
+            self.unlock_name(&(new_loc_dpath.clone(), fsargs.new_loc.filename));
+            return Err(res.err().unwrap().into());
+        }
+
+        // At this point the file has been renamed... we just need to clean up
+
+        // Unlock the name
+        self.unlock_name(&(new_loc_dpath.clone(), fsargs.new_loc.filename));
+
+        // Remove the old named file... we don't even need to flush!
+        remove_file(old_loc_fpath_named)?;
+
+        // DONE!
+        Ok(())
     }
 
     fn handle_mkdir(&self, fsargs: ZipCreateArgs) -> thrift::Result<ZipDirOpRes> {

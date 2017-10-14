@@ -74,6 +74,17 @@ fn fake_create_args(did: i64, filename: &str) -> ZipCreateArgs {
     ZipCreateArgs::new(where_, attributes)
 }
 
+fn fake_rename_args(
+    old_did: i64,
+    old_filename: &str,
+    new_did: i64,
+    new_filename: &str,
+) -> ZipRenameArgs {
+    let old = fake_dir_op_args(old_did, &old_filename);
+    let new = fake_dir_op_args(new_did, &new_filename);
+    ZipRenameArgs::new(old, new)
+}
+
 #[test]
 fn test_atomic_persistent_usize() {
     run_with_clone_fs("test_files/test1", true, |fspath| {
@@ -417,8 +428,8 @@ fn test_fs_create_obj() {
 }
 
 fn create_object(is_file: bool) {
-    // Create a server
     run_with_clone_fs("test_files/test1", true, |fspath| {
+        // Create a server
         let server = ZippynfsServer::new(fspath);
 
         // Call create_object repeatedly
@@ -679,4 +690,131 @@ fn test_nfs_readdir() {
             _ => assert!(false),
         }
     })
+}
+
+#[test]
+fn test_nfs_rename() {
+    run_with_clone_fs("test_files/test1", true, |fspath| {
+        // Create a server
+        let server = ZippynfsServer::new(fspath);
+
+        // Move some stuff
+
+        // 1. file that exists to new file
+        let _move3 = server
+            .handle_rename(fake_rename_args(2, "zee.txt", 1, "zee.mv.txt"))
+            .unwrap();
+
+        // 2. dir that exists to new dir
+        let _move1 = server
+            .handle_rename(fake_rename_args(0, "foo", 5, "foo.mv"))
+            .unwrap();
+
+        // 3. file that doesn't exist
+        let move3_again = server.handle_rename(fake_rename_args(2, "zee.txt", 1, "zee.mv.txt"));
+
+        // 4. dir that doesn't exist
+        let move1_again = server.handle_rename(fake_rename_args(0, "foo", 5, "foo.mv"));
+
+        // 5. file that does exists to dir that doesn't
+        let move3_again2 =
+            server.handle_rename(fake_rename_args(1, "zee.mv.txt", 6, "zee.mv.again2.txt"));
+
+        // 6. dir that does exists to dir that doesn't
+        let move1_again2 = server.handle_rename(fake_rename_args(5, "foo.mv", 6, "foo.mv.again2"));
+
+        // 7. file that exists to file that already exists
+        let move3_again3 = server.handle_rename(fake_rename_args(1, "zee.mv.txt", 0, "baz.txt"));
+
+        // 8. file that exists to dir that already exists
+        let move3_again4 = server.handle_rename(fake_rename_args(1, "zee.mv.txt", 0, "bazee"));
+
+        // 9. dir that exists to dir that already exists
+        let move1_again3 = server.handle_rename(fake_rename_args(5, "foo.mv", 0, "bazee"));
+
+        // 10. dir that exists to file that already exists
+        let move1_again4 = server.handle_rename(fake_rename_args(5, "foo.mv", 0, "baz.txt"));
+
+        // 11. dir into itself
+        let move1_again5 = server.handle_rename(fake_rename_args(5, "foo.mv", 1, "heheheh"));
+
+        // Correctness
+
+        // Make sure the old file was deleted and the new one created
+        let find1_old = server.fs_find_by_name(fspath.join("0"), "foo").unwrap();
+        let find1_new = server
+            .fs_find_by_name(fspath.join("0/5"), "foo.mv")
+            .unwrap();
+
+        assert!(find1_old.is_none());
+        assert_eq!(find1_new, Some(1));
+
+        let find3_old = server
+            .fs_find_by_name(fspath.join("0/5/1/2"), "zee.txt")
+            .unwrap();
+        let find3_new = server
+            .fs_find_by_name(fspath.join("0/5/1"), "zee.mv.txt")
+            .unwrap();
+
+        assert!(find3_old.is_none());
+        assert_eq!(find3_new, Some(3));
+
+        // None of the other operations should have succeeded
+
+        // 3
+        match move3_again.map_err(|e| e.into()) {
+            Err(ZipError::Nfs(ZipErrorType::NFSERR_NOENT, _)) => {}
+            _ => assert!(false),
+        }
+
+        // 4
+        match move1_again.map_err(|e| e.into()) {
+            Err(ZipError::Nfs(ZipErrorType::NFSERR_NOENT, _)) => {}
+            _ => assert!(false),
+        }
+
+        // 5
+        match move3_again2.map_err(|e| e.into()) {
+            Err(ZipError::Nfs(ZipErrorType::NFSERR_STALE, _)) => {}
+            _ => assert!(false),
+        }
+
+        // 6
+        match move1_again2.map_err(|e| e.into()) {
+            Err(ZipError::Nfs(ZipErrorType::NFSERR_STALE, _)) => {}
+            _ => assert!(false),
+        }
+
+        // 7
+        match move1_again3.map_err(|e| e.into()) {
+            Err(ZipError::Nfs(ZipErrorType::NFSERR_EXIST, _)) => {}
+            _ => assert!(false),
+        }
+
+        // 8
+        match move1_again4.map_err(|e| e.into()) {
+            Err(ZipError::Nfs(ZipErrorType::NFSERR_EXIST, _)) => {}
+            _ => assert!(false),
+        }
+
+        // 9
+        match move3_again3.map_err(|e| e.into()) {
+            Err(ZipError::Nfs(ZipErrorType::NFSERR_EXIST, _)) => {}
+            _ => assert!(false),
+        }
+
+        // 10
+        match move3_again4.map_err(|e| e.into()) {
+            Err(ZipError::Nfs(ZipErrorType::NFSERR_EXIST, _)) => {}
+            _ => assert!(false),
+        }
+
+        // 11
+        match move1_again5 {
+            Err(_) => {}
+            _ => assert!(false),
+        }
+
+    })
+
 }
