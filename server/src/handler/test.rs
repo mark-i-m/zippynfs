@@ -818,3 +818,68 @@ fn test_nfs_rename() {
     })
 
 }
+
+#[test]
+fn test_nfs_rename_concurrent() {
+    use std::fs::{create_dir, remove_dir_all, File};
+    use std::io::Write;
+    use std::sync::Arc;
+    use std::thread;
+
+    // Cleanup after previous attempts
+    let fspath: PathBuf = "test_files/test_rename_concurrent".into();
+    if fspath.exists() {
+        remove_dir_all(&fspath).unwrap();
+    }
+
+    // Populate the new directory
+    create_dir(&fspath).unwrap();
+    File::create(fspath.join("0.root")).unwrap();
+    create_dir(fspath.join("0")).unwrap();
+    File::create(fspath.join("counter"))
+        .unwrap()
+        .write(&[1, 0, 0, 0, 0, 0, 0, 0])
+        .unwrap();
+
+    // If this is 1000, then initial remove_dir_all() or child.join() fail
+    const NTHREADS: usize = 1000;
+
+    // Create a new scope because server drop interfers with test cleanup
+    {
+        let server = Arc::new(ZippynfsServer::new(fspath.clone()));
+        let mut children = Vec::with_capacity(NTHREADS);
+
+        // Create a bunch of racing threads
+        for i in 0..NTHREADS {
+            let server = server.clone();
+            children.push(thread::spawn(move || {
+                let old_name = format!("myobj{}", i);
+                let _ = server
+                    .create_object(fake_create_args(0, &old_name), i % 2 == 0)
+                    .unwrap();
+                let _ = server.handle_rename(fake_rename_args(0, &old_name, 0, "foo"));
+            }));
+        }
+
+        // Wait for all threads to exit
+        for child in children {
+            child.join().unwrap();
+        }
+
+        // Correctness
+
+        // At most one file called "foo" got created
+        let find_foo = server.fs_find_by_name(fspath.join("0"), "foo").unwrap();
+
+        if let Some(fid) = find_foo {
+            for i in 1..NTHREADS {
+                if i != fid {
+                    assert!(!fspath.join(format!("0/{}.foo", i)).exists());
+                }
+            }
+        }
+    }
+
+    // Cleanup afterwards, if needed
+    remove_dir_all(&fspath).unwrap();
+}
