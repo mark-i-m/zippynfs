@@ -76,7 +76,7 @@ fn fake_create_args(did: i64, filename: &str) -> ZipCreateArgs {
 
 #[test]
 fn test_atomic_persistent_usize() {
-    run_with_clone_fs("test_files/test1", false, |fspath| {
+    run_with_clone_fs("test_files/test1", true, |fspath| {
         {
             let counter = AtomicPersistentUsize::from_file(fspath.join("counter")).unwrap();
 
