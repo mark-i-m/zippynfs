@@ -320,38 +320,45 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
             return Err(nfs_error(ZipErrorType::NFSERR_NOTDIR));
         }
 
-        // Lookup the file in the directory
-        let fid = self.fs_find_by_name(dpath.clone(), filename)?;
-
-        // Return a result
-        match fid {
-            Some(_) => {
-                debug!("File \"{}\" exists", filename);
-                Err(nfs_error(ZipErrorType::NFSERR_EXIST))
-            }
-            None => {
-                // Value for name_lock
-                let value = (dpath.clone(), filename.clone());
-
-                // Lock filename
-                if !self.lock_name(value.clone()) {
-                    return Err(nfs_error(ZipErrorType::NFSERR_EXIST));
-                }
-
-                // Create a new directory
-                let (new_fid, fpath_numbered) = self.fs_create_obj(dpath, filename, is_file)?;
-
-                // TODO: set attributes using fsargs.attributes
-
-                // Unlock filename
-                self.unlock_name(&value);
-
-                Ok(ZipDirOpRes::new(
-                    ZipFileHandle::new(new_fid as i64),
-                    self.fs_get_attr(fpath_numbered, new_fid as u64),
-                ))
-            }
+        // Lock the name so that after we check we know we have the name
+        if !self.lock_name((dpath.clone(), filename.clone())) {
+            // Could not lock == name already exists (so one else got there first)
+            return Err(nfs_error(ZipErrorType::NFSERR_EXIST));
         }
+
+        // NOTE: We cannot use `?` until we unlock so as not to cause deadlock!
+
+        // Make sure the given filename does not exist already
+        let already = self.fs_find_by_name(dpath.clone(), &filename);
+
+        // If we have some random error, then unlock
+        if already.is_err() {
+            self.unlock_name(&(dpath.clone(), filename.clone()));
+            debug!("File \"{}\" exists", filename);
+            return Err(already.err().unwrap().into());
+        }
+
+        // If the name already exists, then unlock
+        if already.ok().unwrap().is_some() {
+            self.unlock_name(&(dpath.clone(), filename.clone()));
+            debug!("File \"{}\" exists", filename);
+            return Err(nfs_error(ZipErrorType::NFSERR_EXIST));
+        }
+
+        // If we get to this point, we know that we own the name!
+
+        // Create a new directory
+        let (new_fid, fpath_numbered) = self.fs_create_obj(dpath.clone(), filename, is_file)?;
+
+        // TODO: set attributes using fsargs.attributes
+
+        // Unlock filename
+        self.unlock_name(&(dpath, filename.to_owned()));
+
+        Ok(ZipDirOpRes::new(
+            ZipFileHandle::new(new_fid as i64),
+            self.fs_get_attr(fpath_numbered, new_fid as u64),
+        ))
     }
 
     /// Delete the filesystem object in the given directory with the given fid
@@ -597,7 +604,7 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
             return Err(nfs_error(ZipErrorType::NFSERR_EXIST));
         }
 
-        // NOTE: We cannot use `?` until we unlock so as not new_loc cause deadlock!
+        // NOTE: We cannot use `?` until we unlock so as not to cause deadlock!
 
         // Make sure the given filename does not exist already
         let already = self.fs_find_by_name(new_loc_dpath.clone(), &fsargs.new_loc.filename);
