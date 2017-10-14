@@ -6,6 +6,7 @@ use std::process::Command;
 use std::error::Error as std_err;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 use regex::Regex;
 
@@ -13,6 +14,13 @@ use zippyrpc::*;
 
 use super::AtomicPersistentUsize;
 use super::ZippynfsServer;
+
+/// Prevent multiple concurrent test from running at the same time
+/// because we open too many file descriptors.
+lazy_static! {
+    #[allow(unused_item)]
+    static ref CONC_TEST_LOCK: Mutex<()> = Mutex::new(());
+}
 
 fn cleanup_git_hackery_test1<P>(fspath: P)
 where
@@ -114,6 +122,8 @@ fn test_atomic_persistent_usize() {
 fn test_atomic_persistent_usize_concurrent() {
     use std::sync::Arc;
     use std::thread;
+
+    let _ctl = CONC_TEST_LOCK.lock();
 
     run_with_clone_fs("test_files/test1", true, |fspath| {
         const NTHREADS: usize = 1000;
@@ -461,6 +471,8 @@ fn create_object_concurrent(is_file: bool) {
     use std::io::Write;
     use std::sync::Arc;
     use std::thread;
+
+    let _ctl = CONC_TEST_LOCK.lock();
 
     // Cleanup after previous attempts
     let fspath: PathBuf = format!("test_files/test_create_object_concurrent_{}", is_file).into();
@@ -825,6 +837,8 @@ fn test_nfs_rename_concurrent() {
     use std::io::Write;
     use std::sync::Arc;
     use std::thread;
+
+    let _ctl = CONC_TEST_LOCK.lock();
 
     // Cleanup after previous attempts
     let fspath: PathBuf = "test_files/test_rename_concurrent".into();
