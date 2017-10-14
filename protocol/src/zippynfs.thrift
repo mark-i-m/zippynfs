@@ -75,9 +75,14 @@ struct ZipDirOpRes{
 }
 
 struct ZipReadArgs{
+    1: required ZipFileHandle file;
+    2: required i64 offset;
+    3: required i64 count;
 }
 
 struct ZipReadRes{
+    1: required ZipFattr attributes;
+    2: required binary data;
 }
 
 struct ZipReadDirArgs{
