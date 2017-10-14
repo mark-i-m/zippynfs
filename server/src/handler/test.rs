@@ -4,6 +4,8 @@ use std::collections::HashSet;
 use std::process::Command;
 #[allow(unused_imports)]
 use std::error::Error as std_err;
+use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -29,6 +31,7 @@ where
 
     remove_file((&fspath).as_ref().join("0/5/32.empty")).unwrap();
     remove_file((&fspath).as_ref().join("0/6/33.empty")).unwrap();
+    remove_file((&fspath).as_ref().join("tmp/0")).unwrap();
 }
 
 fn run_with_clone_fs<'t, P, F>(fspath: P, clean_after: bool, f: F)
@@ -947,5 +950,42 @@ fn test_nfs_statfs() {
         // Make sure we can create a server
         let server = ZippynfsServer::new(fspath);
         let _statfs = server.handle_statfs(ZipFileHandle::new(0)).unwrap();
+    })
+}
+
+#[test]
+fn test_nfs_write() {
+    run_with_clone_fs("test_files/test1", true, |fspath| {
+        // Create a server
+        let server = ZippynfsServer::new(fspath);
+
+        // Write a file
+        let data = "Hello, World!".as_bytes();
+        let write3 = server
+            .handle_write(ZipWriteArgs::new(
+                ZipFileHandle::new(3),
+                0, // offset
+                data.len() as i64, // count
+                data.clone().into(),
+                ZipWriteStable::FILE_SYNC,
+            ))
+            .unwrap();
+
+        // Correctness
+        assert_eq!(write3.count as usize, 13);
+        assert_eq!(write3.committed, ZipWriteStable::FILE_SYNC);
+        assert_eq!(write3.verf, 8); // server epoch
+
+        // Check that the write happened
+        assert_eq!(data.len(), 13);
+        let mut buf = [0u8; 13];
+
+        let fpath_numbered = fspath.join("0/1/2/3");
+        let mut file = File::open(fpath_numbered).unwrap();
+
+        assert_eq!(file.metadata().unwrap().len(), data.len() as u64);
+
+        file.read_exact(&mut buf).unwrap();
+        assert_eq!(buf, data);
     })
 }

@@ -6,11 +6,12 @@ mod counter;
 #[cfg(test)]
 mod test;
 
-use std::fs::{create_dir, read_dir, remove_dir, remove_file, rename, File};
-use std::io::Write;
+use std::fs::{create_dir, read_dir, remove_dir, remove_file, rename, copy, File, OpenOptions};
+use std::io::{Write, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::thread::current;
 use std::collections::{HashSet, VecDeque};
 
 use regex::Regex;
@@ -547,7 +548,61 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
     }
 
     fn handle_write(&self, fsargs: ZipWriteArgs) -> thrift::Result<ZipWriteRes> {
-        Err("Unimplemented".into())
+        info!("handling Write {:?}", fsargs);
+
+        // TODO: stable vs async writes
+
+        // find the file
+        let fpath_numbered = self.fs_find_by_fid(fsargs.file.fid as usize)?;
+
+        debug!("found file at path {:?}", fpath_numbered);
+
+        // Make sure it exists
+        if fpath_numbered.is_none() {
+            return Err(nfs_error(ZipErrorType::NFSERR_STALE));
+        }
+
+        let fpath_numbered = fpath_numbered.unwrap();
+
+        // Create a tmp file by copying the existing file
+        //
+        // We name the tmp file after the FID and this thread's TID so
+        // as to avoid interleaving writes from different client reqs.
+        let tid = current().id();
+        let tmp_fpath = (&self.data_dir).as_ref().join(format!(
+            "tmp/{}_{:?}",
+            fsargs.file.fid,
+            tid
+        ));
+        copy(&fpath_numbered, &tmp_fpath)?;
+
+        {
+            // Open the file for the write
+            let mut tmp_file = OpenOptions::new().write(true).open(&tmp_fpath)?;
+
+            // Flush the tmp file to ensure we have its contents
+            tmp_file.sync_all()?;
+
+            // Seek to the write location
+            tmp_file.seek(SeekFrom::Start(fsargs.offset as u64))?;
+
+            // Write the data to the file
+            assert_eq!(fsargs.data.len(), fsargs.count as usize);
+            tmp_file.write_all(&fsargs.data)?;
+
+            // Flush the file
+            tmp_file.sync_all()?;
+        } // File closed
+
+        // Atomic rename file
+        rename(tmp_fpath, fpath_numbered)?;
+
+        // DONE!
+        Ok(ZipWriteRes::new(
+            fsargs.data.len() as i64,
+            ZipWriteStable::FILE_SYNC, // TODO: for now everything is sync
+            self.epoch as i64,
+        ))
     }
 
     fn handle_create(&self, fsargs: ZipCreateArgs) -> thrift::Result<ZipDirOpRes> {
@@ -558,26 +613,26 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
     }
 
     fn handle_remove(&self, fsargs: ZipDirOpArgs) -> thrift::Result<()> {
-        info!("Handling REMOVE {:?}", fsargs);
+        info!("handling remove {:?}", fsargs);
 
-        // Find the directory
+        // find the directory
         let dpath = self.fs_find_by_fid(fsargs.dir.fid as usize)?;
 
-        debug!("Found parent at path {:?}", dpath);
+        debug!("found parent at path {:?}", dpath);
 
-        // Make sure that directory exists
+        // make sure that directory exists
         if dpath.is_none() {
             return Err(nfs_error(ZipErrorType::NFSERR_STALE));
         }
 
         let dpath = dpath.unwrap();
 
-        // Make sure dpath is a directory
+        // make sure dpath is a directory
         if !dpath.is_dir() {
             return Err(nfs_error(ZipErrorType::NFSERR_NOTDIR));
         }
 
-        // Lookup the file in the directory
+        // lookup the file in the directory
         let fid = self.fs_find_by_name(dpath.clone(), &fsargs.filename)?;
 
         match fid {
