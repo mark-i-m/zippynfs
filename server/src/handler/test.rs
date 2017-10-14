@@ -452,7 +452,7 @@ fn create_object_concurrent(is_file: bool) {
     use std::thread;
 
     // Cleanup after previous attempts
-    let fspath: PathBuf = "test_files/test_create_object_concurrent".into();
+    let fspath: PathBuf = format!("test_files/test_create_object_concurrent_{}", is_file).into();
     if fspath.exists() {
         remove_dir_all(&fspath).unwrap();
     }
