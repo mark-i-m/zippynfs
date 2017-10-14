@@ -35,21 +35,30 @@ fn sys_time_to_zip_time(sys_time: SystemTime) -> ZipTimeVal {
 
 /// A server to handle RPC calls
 pub struct ZippynfsServer<'a, P: AsRef<Path>> {
+    /// The directory on the host system where the server stores stuff.
     data_dir: P,
+
+    /// The unique fid generator
     counter: AtomicPersistentUsize<'a>,
 
-    // We need to be sure that no two files in the system have exactly the same path, so for the
-    // time until a file is created (or renamed) that name must be inserted into this set. The
-    // procedure is as follows (to insert a file called "foo" into directory with fid=3):
-    //
-    // 1. Grab the locked set
-    // 2. Insert /path/to/fs/0/3/foo to set
-    // 3. Release lock on set
-    // 4. Do FS stuff to create the file
-    // 5. Grab the locked set
-    // 6. Remove our entry from the set
-    // 7. Release the lock
+    /// We need to be sure that no two files in the system have exactly the same path, so for the
+    /// time until a file is created (or renamed) that name must be inserted into this set. The
+    /// procedure is as follows (to insert a file called "foo" into directory with fid=3):
+    ///
+    /// 1. Grab the locked set
+    /// 2. Insert /path/to/fs/0/3/foo to set
+    /// 3. Release lock on set
+    /// 4. Do FS stuff to create the file
+    /// 5. Grab the locked set
+    /// 6. Remove our entry from the set
+    /// 7. Release the lock
     name_lock: Mutex<HashSet<(PathBuf, String)>>,
+
+    /// The epoch number of this server. When it crashes, it should come up with a new number. This
+    /// alerts writers that they probably should not count on cached data being there.
+    ///
+    /// In this implementation, we just use the next value of the FID counter, since it is unique.
+    epoch: usize,
 }
 
 impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
@@ -59,11 +68,15 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
         let counter = AtomicPersistentUsize::from_file((data_dir).as_ref().join("counter"))
             .unwrap();
 
+        // Get the next FID to use as an epoch number for the server
+        let epoch = counter.fetch_inc();
+
         // Create the struct
         ZippynfsServer {
             data_dir,
             counter,
             name_lock: Mutex::new(HashSet::new()),
+            epoch,
         }
     }
 
@@ -505,7 +518,7 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
         Err("Unimplemented".into())
     }
 
-    fn handle_write(&self, fsargs: ZipWriteArgs) -> thrift::Result<ZipAttrStat> {
+    fn handle_write(&self, fsargs: ZipWriteArgs) -> thrift::Result<ZipWriteRes> {
         Err("Unimplemented".into())
     }
 

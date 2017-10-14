@@ -62,6 +62,8 @@ struct ZipAttrStat {
 }
 
 struct ZipSattrArgs{
+    1: required ZipFileHandle file;
+    2: required ZipSattr attributes;
 }
 
 struct ZipDirOpArgs{
@@ -98,7 +100,24 @@ struct ZipReadDirRes{
     1: required list<ZipDirEntry> entries;
 }
 
+enum ZipWriteStable {
+    UNSTABLE = 0,
+    DATA_SYNC = 1,
+    FILE_SYNC = 2,
+}
+
 struct ZipWriteArgs{
+    1: required ZipFileHandle file;
+    2: required i64 offset;
+    3: required i64 count;
+    4: required binary data;
+    5: required ZipWriteStable stable;
+}
+
+struct ZipWriteRes {
+    1: required i64 count;
+    2: required ZipWriteStable committed;
+    3: required i64 verf;
 }
 
 struct ZipCreateArgs{
@@ -107,6 +126,11 @@ struct ZipCreateArgs{
 }
 
 struct ZipStatFsRes{
+    1: required i64 tsize;
+    2: required i64 bsize;
+    3: required i64 blocks;
+    4: required i64 bfree;
+    5: required i64 bavail;
 }
 
 struct ZipRenameArgs{
@@ -115,9 +139,13 @@ struct ZipRenameArgs{
 }
 
 struct ZipCommitArgs{
+    1: required ZipFileHandle file;
+    2: required i64 count;
+    3: required i64 offset;
 }
 
 struct ZipCommitRes{
+    1: required i64 verf;
 }
 
 service Zippynfs {
@@ -126,7 +154,7 @@ service Zippynfs {
    ZipAttrStat setattr(1:ZipSattrArgs fsargs) throws (1: ZipException ex);
    ZipDirOpRes lookup(1:ZipDirOpArgs fsargs) throws (1: ZipException ex);
    ZipReadRes read(1:ZipReadArgs fsargs) throws (1: ZipException ex);
-   ZipAttrStat write(1:ZipWriteArgs fsargs) throws (1: ZipException ex);
+   ZipWriteRes write(1:ZipWriteArgs fsargs) throws (1: ZipException ex);
    ZipDirOpRes create(1:ZipCreateArgs fsargs) throws (1: ZipException ex);
    void remove(1:ZipDirOpArgs fsargs) throws (1: ZipException ex);
    void rename(1:ZipRenameArgs fsargs) throws (1: ZipException ex);
