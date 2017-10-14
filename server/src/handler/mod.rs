@@ -69,8 +69,7 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
             .unwrap();
 
         // Get the next FID to use as an epoch number for the server
-        //let epoch = counter.fetch_inc();
-        let epoch = 0; // TODO
+        let epoch = counter.fetch_inc();
 
         // Create the struct
         ZippynfsServer {

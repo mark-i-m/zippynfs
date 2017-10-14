@@ -404,10 +404,10 @@ fn test_fs_create_obj() {
         let server = ZippynfsServer::new(fspath);
 
         // Check that objects do not exist
-        assert!(!fspath.join("0/8").exists());
-        assert!(!fspath.join("0/8.myfile.txt").exists());
         assert!(!fspath.join("0/9").exists());
-        assert!(!fspath.join("0/9.mydir").exists());
+        assert!(!fspath.join("0/9.myfile.txt").exists());
+        assert!(!fspath.join("0/10").exists());
+        assert!(!fspath.join("0/10.mydir").exists());
 
         // Create a couple of objects
         let create1 = server
@@ -419,18 +419,18 @@ fn test_fs_create_obj() {
         // TODO: possibly add more tests
 
         // Correctness
-        assert_eq!(create1, (8, fspath.join("0/8")));
-        assert_eq!(create2, (9, fspath.join("0/9")));
+        assert_eq!(create1, (9, fspath.join("0/9")));
+        assert_eq!(create2, (10, fspath.join("0/10")));
 
         // Check that they exist
-        assert!(fspath.join("0/8").exists());
-        assert!(fspath.join("0/8").is_file());
-        assert!(fspath.join("0/8.myfile.txt").exists());
-        assert!(fspath.join("0/8.myfile.txt").is_file());
         assert!(fspath.join("0/9").exists());
-        assert!(fspath.join("0/9").is_dir());
-        assert!(fspath.join("0/9.mydir").exists());
-        assert!(fspath.join("0/9.mydir").is_file());
+        assert!(fspath.join("0/9").is_file());
+        assert!(fspath.join("0/9.myfile.txt").exists());
+        assert!(fspath.join("0/9.myfile.txt").is_file());
+        assert!(fspath.join("0/10").exists());
+        assert!(fspath.join("0/10").is_dir());
+        assert!(fspath.join("0/10.mydir").exists());
+        assert!(fspath.join("0/10.mydir").is_file());
     })
 }
 
@@ -447,7 +447,7 @@ fn create_object(is_file: bool) {
         let create3 = server.create_object(fake_create_args(2, "zee.txt"), is_file);
 
         // Correctness
-        assert_eq!(create1.file.fid, 8);
+        assert_eq!(create1.file.fid, 9);
 
         assert!(create2.is_err());
         match create2.map_err(|e| e.into()).err().unwrap() {
@@ -511,11 +511,13 @@ fn create_object_concurrent(is_file: bool) {
     }
 
     // Only one numbered file and named file got created
-    assert!(fspath.join("0/1.myobj").exists());
-    assert!(fspath.join("0/1").exists());
-    for i in 2..NTHREADS {
-        assert!(!fspath.join(format!("0/{}.myobj", i)).exists());
-        assert!(!fspath.join(format!("0/{}", i)).exists());
+    assert!(fspath.join("0/2.myobj").exists());
+    assert!(fspath.join("0/2").exists());
+    for i in 1..NTHREADS {
+        if i != 2 {
+            assert!(!fspath.join(format!("0/{}.myobj", i)).exists());
+            assert!(!fspath.join(format!("0/{}", i)).exists());
+        }
     }
 
     // Cleanup afterwards, if needed
