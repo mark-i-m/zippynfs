@@ -504,7 +504,46 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
     }
 
     fn handle_read(&self, fsargs: ZipReadArgs) -> thrift::Result<ZipReadRes> {
-        Err("Unimplemented".into())
+        // For File::read_at() on Unix-like systems
+        use std::os::unix::fs::FileExt;
+
+        info!("Handling READ {:?}", fsargs);
+
+        // Find the file
+        let fpath = self.fs_find_by_fid(fsargs.file.fid as usize)?;
+
+        debug!("Found file at path {:?}", fpath);
+
+        // Make sure that file exists
+        if fpath.is_none() {
+            return Err(nfs_error(ZipErrorType::NFSERR_STALE));
+        }
+
+        let fpath = fpath.unwrap();
+
+        // Make sure fpath is not a directory
+        if !fpath.is_file() {
+            return Err(nfs_error(ZipErrorType::NFSERR_ISDIR));
+        }
+
+        // Get file contents
+        let mut data = vec![0; fsargs.count as usize];
+        {
+            let f = File::open(&fpath).unwrap();
+            // The underlying filesystem makes sure this works, even if another thread
+            // concurrently renames or unlinks the file.
+            let actual_size = f.read_at(&mut data[..], fsargs.offset as u64).unwrap();
+            data.resize(actual_size, 0);
+        }
+        let data = data;
+
+        debug!("Contents: {:?}", data);
+
+        // Done
+        Ok(ZipReadRes::new(
+            self.fs_get_attr(fpath, fsargs.file.fid as u64),
+            data,
+        ))
     }
 
     fn handle_write(&self, fsargs: ZipWriteArgs) -> thrift::Result<ZipWriteRes> {

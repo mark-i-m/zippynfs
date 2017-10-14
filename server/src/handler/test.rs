@@ -75,6 +75,10 @@ fn fake_dir_op_args(did: i64, filename: &str) -> ZipDirOpArgs {
     ZipDirOpArgs::new(ZipFileHandle::new(did), filename.to_owned())
 }
 
+fn fake_read_args(fid: i64, offset: i64, count: i64) -> ZipReadArgs {
+    ZipReadArgs::new(ZipFileHandle::new(fid), offset, count)
+}
+
 fn fake_create_args(did: i64, filename: &str) -> ZipCreateArgs {
     let where_ = fake_dir_op_args(did, &filename);
     let attributes = ZipSattr::new(0, 0, 0, ZipTimeVal::new(0, 0), ZipTimeVal::new(0, 0));
@@ -279,7 +283,7 @@ fn test_fs_get_attr() {
         assert_eq!(attr5.fid, 5);
 
         // For files:
-        assert_eq!(attr3.size, 0);
+        assert_eq!(attr3.size, 27);
         assert_eq!(attr4.size, 0);
 
         assert_eq!(attr0.type_, ZipFtype::NFDIR);
@@ -330,7 +334,7 @@ fn test_nfs_lookup() {
         assert_eq!(lookup5.file.fid, 5);
 
         // For the two files
-        assert_eq!(lookup3.attributes.size, 0);
+        assert_eq!(lookup3.attributes.size, 27);
         assert_eq!(lookup4.attributes.size, 0);
 
         assert_eq!(lookup1.attributes.fid, 1);
@@ -344,6 +348,46 @@ fn test_nfs_lookup() {
         assert_eq!(lookup3.attributes.type_, ZipFtype::NFREG);
         assert_eq!(lookup4.attributes.type_, ZipFtype::NFREG);
         assert_eq!(lookup5.attributes.type_, ZipFtype::NFDIR);
+    })
+}
+
+#[test]
+fn test_nfs_read() {
+    run_with_clone_fs("test_files/test1", true, |fspath| {
+        // Create a server
+        let server = ZippynfsServer::new(fspath);
+
+        // READ a bunch of things
+        let read1 = server.handle_read(fake_read_args(3, 1, 10)).unwrap();
+        let read2 = server.handle_read(fake_read_args(3, 0, 30)).unwrap();
+        let read3 = server.handle_read(fake_read_args(3, 30, 10)).unwrap();
+        let read4 = server.handle_read(fake_read_args(3, 0, 0)).unwrap();
+        let read5 = server.handle_read(fake_read_args(4, 0, 10)).unwrap();
+
+        // Correctness
+        assert_eq!(read1.attributes.size, 27);
+        assert_eq!(read2.attributes.size, 27);
+        assert_eq!(read3.attributes.size, 27);
+        assert_eq!(read4.attributes.size, 27);
+        assert_eq!(read5.attributes.size, 0);
+
+        assert_eq!(read1.attributes.fid, 3);
+        assert_eq!(read2.attributes.fid, 3);
+        assert_eq!(read3.attributes.fid, 3);
+        assert_eq!(read4.attributes.fid, 3);
+        assert_eq!(read5.attributes.fid, 4);
+
+        assert_eq!(read1.attributes.type_, ZipFtype::NFREG);
+        assert_eq!(read2.attributes.type_, ZipFtype::NFREG);
+        assert_eq!(read3.attributes.type_, ZipFtype::NFREG);
+        assert_eq!(read4.attributes.type_, ZipFtype::NFREG);
+        assert_eq!(read5.attributes.type_, ZipFtype::NFREG);
+
+        assert_eq!(&read1.data[..], "bcdefghijk".as_bytes());
+        assert_eq!(&read2.data[..], "abcdefghijklmnopqrstuvwxyz\n".as_bytes());
+        assert_eq!(&read3.data[..], "".as_bytes());
+        assert_eq!(&read4.data[..], "".as_bytes());
+        assert_eq!(&read5.data[..], "".as_bytes());
     })
 }
 
