@@ -897,3 +897,10 @@ fn test_nfs_rename_concurrent() {
     // Cleanup afterwards, if needed
     remove_dir_all(&fspath).unwrap();
 }
+
+#[test]
+fn test_nfs_statfs() {
+    // Make sure we can create a server
+    let server = ZippynfsServer::new("test_files/test1/");
+    let _statfs = server.handle_statfs(ZipFileHandle::new(0)).unwrap();
+}

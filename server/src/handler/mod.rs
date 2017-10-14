@@ -779,8 +779,15 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
         ))
     }
 
-    fn handle_statfs(&self, fhandle: ZipFileHandle) -> thrift::Result<ZipStatFsRes> {
-        Err("Unimplemented".into())
+    fn handle_statfs(&self, _: ZipFileHandle) -> thrift::Result<ZipStatFsRes> {
+        // I totally made up these numbers... maybe they are reasonable (but probably not)
+        Ok(ZipStatFsRes::new(
+            2 << 20,
+            1 << 12,
+            1 << 20,
+            1 << 20,
+            1 << 20,
+        ))
     }
 
     fn handle_commit(&self, fsargs: ZipCommitArgs) -> thrift::Result<ZipCommitRes> {
