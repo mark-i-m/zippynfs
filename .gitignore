@@ -17,3 +17,4 @@ protocol/src/zippynfs.rs
 server/test_files/_clone_fs*
 server/test_files/test_create_object_concurrent_*
 server/test_files/test_mkdir_concurrent
+server/test_files/test_rename_concurrent

@@ -69,7 +69,8 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
             .unwrap();
 
         // Get the next FID to use as an epoch number for the server
-        let epoch = counter.fetch_inc();
+        //let epoch = counter.fetch_inc();
+        let epoch = 0; // TODO
 
         // Create the struct
         ZippynfsServer {
@@ -252,16 +253,7 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
     ///
     /// Returns true if the name was locked and false it was already locked.
     fn lock_name(&self, name: (PathBuf, String)) -> bool {
-        let mut set = self.name_lock.lock().unwrap();
-
-        if set.contains(&name) {
-            return false;
-        }
-
-        set.insert(name);
-        // TODO: flush cache?
-
-        true
+        self.name_lock.lock().unwrap().insert(name)
     }
 
     /// Remove the given name from the `name_lock`
@@ -271,10 +263,8 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
     /// NOTE: The burden is on the caller to ensure the name is already in the `name_lock`.
     /// We will `panic!` otherwise!
     fn unlock_name(&self, name: &(PathBuf, String)) {
-        let mut set = self.name_lock.lock().unwrap();
-        let present = set.remove(name);
+        let present = self.name_lock.lock().unwrap().remove(name);
         assert!(present);
-        // TODO: flush cache?
     }
 
     /// Create the filesystem object in the given directory and increment counter
