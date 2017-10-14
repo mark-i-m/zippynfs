@@ -5,9 +5,11 @@ extern crate try_from;
 
 extern crate zippyrpc;
 extern crate client;
+extern crate thrift;
+
+use std::process::exit;
 
 use try_from::{TryFrom, TryInto};
-use std::process::exit;
 
 use client::new_client;
 
@@ -107,15 +109,15 @@ fn is_addr(arg: String) -> Result<(), String> {
 ///
 /// This creates an RPC client to the appropriate server and attempts to
 /// execute the given command.
-fn run(server_addr: &str, command: NfsCommand) -> Result<(), String> {
+fn run(server_addr: &str, command: NfsCommand) -> Result<(), ZipError> {
     // build a rpc client
-    let mut client = new_client(server_addr).map_err(|e| format!("{}", e))?;
+    let mut client = new_client(server_addr)?;
 
     // Attempt to execute the appropriate command
     match command {
         NfsCommand::Null => {
             println!("Executing NULL");
-            client.null().map_err(|e| format!("{}", e))?;
+            client.null()?;
             Ok(())
         }
 
@@ -146,7 +148,7 @@ fn run(server_addr: &str, command: NfsCommand) -> Result<(), String> {
             // Check the result
             println!("Received response: {:?}", res);
 
-            res.map(|_| ()).map_err(|e| format!("{}", e))
+            res.map(|_| ())
         }
 
         NfsCommand::Lookup(did, fname) => {
@@ -161,7 +163,7 @@ fn run(server_addr: &str, command: NfsCommand) -> Result<(), String> {
             // Check the result
             println!("Received response: {:?}", res);
 
-            res.map(|_| ()).map_err(|e| format!("{}", e))
+            res.map(|_| ())
         }
 
         NfsCommand::Remove(did, fname) => {
@@ -176,7 +178,7 @@ fn run(server_addr: &str, command: NfsCommand) -> Result<(), String> {
             // Check the result
             println!("Received response: {:?}", res);
 
-            res.map(|_| ()).map_err(|e| format!("{}", e))
+            res.map(|_| ())
         }
 
         NfsCommand::RmDir(did, fname) => {
@@ -191,7 +193,7 @@ fn run(server_addr: &str, command: NfsCommand) -> Result<(), String> {
             // Check the result
             println!("Received response: {:?}", res);
 
-            res.map(|_| ()).map_err(|e| format!("{}", e))
+            res.map(|_| ())
         }
 
         NfsCommand::ReadDir(did) => {
@@ -206,9 +208,9 @@ fn run(server_addr: &str, command: NfsCommand) -> Result<(), String> {
             // Check the result
             println!("Received response: {:?}", res);
 
-            res.map(|_| ()).map_err(|e| format!("{}", e))
+            res.map(|_| ())
         }
-    }
+    }.map_err(|e| e.into())
 }
 
 /// The main entry point of the CLI client
@@ -235,7 +237,7 @@ fn main() {
     let command = matches.value_of("command").unwrap().try_into().unwrap();
 
     if let Err(e) = run(server_addr, command) {
-        println!("Error! {}", e);
+        println!("Error! {:?}", e);
         exit(-1);
     } else {
         println!("Success!");

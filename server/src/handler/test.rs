@@ -9,14 +9,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use regex::Regex;
 
-use thrift::Error;
-
 use zippyrpc::*;
 
 use super::AtomicPersistentUsize;
-
 use super::ZippynfsServer;
-use super::errors::*;
 
 fn cleanup_git_hackery_test1<P>(fspath: P)
 where
@@ -301,14 +297,14 @@ fn test_nfs_lookup() {
 
     // Correctness
     assert!(lookup7.is_err());
-    match lookup7.err().unwrap() {
-        Error::Application(err) => assert_eq!(err.message, NFSERR_NOENT),
+    match lookup7.map_err(|e| e.into()).err().unwrap() {
+        ZipError::Nfs(ZipErrorType::NFSERR_NOENT, _) => {}
         _ => assert!(false),
     }
 
     assert!(lookup8.is_err());
-    match lookup8.err().unwrap() {
-        Error::Application(err) => assert_eq!(err.message, NFSERR_NOENT),
+    match lookup8.map_err(|e| e.into()).err().unwrap() {
+        ZipError::Nfs(ZipErrorType::NFSERR_NOENT, _) => {}
         _ => assert!(false),
     }
 
@@ -352,20 +348,20 @@ fn test_nfs_getattr() {
 
     // Correctness
     assert!(attr6.is_err());
-    match attr6.err().unwrap() {
-        Error::Application(err) => assert_eq!(err.message, NFSERR_STALE),
+    match attr6.map_err(|e| e.into()).err().unwrap() {
+        ZipError::Nfs(ZipErrorType::NFSERR_STALE, _) => {}
         _ => assert!(false),
     }
 
     assert!(attr7.is_err());
-    match attr7.err().unwrap() {
-        Error::Application(err) => assert_eq!(err.message, NFSERR_STALE),
+    match attr7.map_err(|e| e.into()).err().unwrap() {
+        ZipError::Nfs(ZipErrorType::NFSERR_STALE, _) => {}
         _ => assert!(false),
     }
 
     assert!(attr8.is_err());
-    match attr8.err().unwrap() {
-        Error::Application(err) => assert_eq!(err.message, NFSERR_STALE),
+    match attr8.map_err(|e| e.into()).err().unwrap() {
+        ZipError::Nfs(ZipErrorType::NFSERR_STALE, _) => {}
         _ => assert!(false),
     }
 
@@ -436,14 +432,14 @@ fn create_object(is_file: bool) {
         assert_eq!(create1.file.fid, 8);
 
         assert!(create2.is_err());
-        match create2.err().unwrap() {
-            Error::Application(err) => assert_eq!(err.message, NFSERR_EXIST),
+        match create2.map_err(|e| e.into()).err().unwrap() {
+            ZipError::Nfs(ZipErrorType::NFSERR_EXIST, _) => {}
             _ => assert!(false),
         }
 
         assert!(create3.is_err());
-        match create3.err().unwrap() {
-            Error::Application(err) => assert_eq!(err.message, NFSERR_EXIST),
+        match create3.map_err(|e| e.into()).err().unwrap() {
+            ZipError::Nfs(ZipErrorType::NFSERR_EXIST, _) => {}
             _ => assert!(false),
         }
     })
@@ -540,22 +536,22 @@ fn test_fs_delete_obj() {
         let del5 = server.fs_delete_obj(fspath.join("0"), 5, "bazee", false); // dir
 
         // Correctness
-        assert_eq!(del4, Ok(()));
-        assert_eq!(del5, Ok(()));
+        assert_eq!(del4.ok().unwrap(), ());
+        assert_eq!(del5.ok().unwrap(), ());
 
         // Check that they no longer exist
         let lookup4 = server.handle_lookup(fake_dir_op_args(0, "baz.txt"));
         let lookup5 = server.handle_lookup(fake_dir_op_args(0, "bazee"));
 
         assert!(lookup4.is_err());
-        match lookup4.err().unwrap() {
-            Error::Application(err) => assert_eq!(err.message, NFSERR_NOENT),
+        match lookup4.map_err(|e| e.into()).err().unwrap() {
+            ZipError::Nfs(ZipErrorType::NFSERR_NOENT, _) => {}
             _ => assert!(false),
         }
 
         assert!(lookup5.is_err());
-        match lookup5.err().unwrap() {
-            Error::Application(err) => assert_eq!(err.message, NFSERR_NOENT),
+        match lookup5.map_err(|e| e.into()).err().unwrap() {
+            ZipError::Nfs(ZipErrorType::NFSERR_NOENT, _) => {}
             _ => assert!(false),
         }
     })
@@ -578,28 +574,28 @@ fn test_nfs_rmdir() {
 
         // Correctness
         assert!(rmdir1.is_err());
-        match rmdir1.err().unwrap() {
-            Error::Application(err) => assert_eq!(err.message, NFSERR_NOTEMPTY),
+        match rmdir1.map_err(|e| e.into()).err().unwrap() {
+            ZipError::Nfs(ZipErrorType::NFSERR_NOTEMPTY, _) => {}
             _ => assert!(false),
         }
 
         assert!(rmdir3.is_err());
-        match rmdir3.err().unwrap() {
-            Error::Application(err) => assert_eq!(err.message, NFSERR_NOTDIR),
+        match rmdir3.map_err(|e| e.into()).err().unwrap() {
+            ZipError::Nfs(ZipErrorType::NFSERR_NOTDIR, _) => {}
             _ => assert!(false),
         }
 
         assert!(rmdir8.is_err());
-        match rmdir8.err().unwrap() {
-            Error::Application(err) => assert_eq!(err.message, NFSERR_NOENT),
+        match rmdir8.map_err(|e| e.into()).err().unwrap() {
+            ZipError::Nfs(ZipErrorType::NFSERR_NOENT, _) => {}
             _ => assert!(false),
         }
 
         // Make sure it is actually deleted
         let lookup5 = server.handle_lookup(fake_dir_op_args(0, "bazee"));
         assert!(lookup5.is_err());
-        match lookup5.err().unwrap() {
-            Error::Application(err) => assert_eq!(err.message, NFSERR_NOENT),
+        match lookup5.map_err(|e| e.into()).err().unwrap() {
+            ZipError::Nfs(ZipErrorType::NFSERR_NOENT, _) => {}
             _ => assert!(false),
         }
     })
@@ -624,28 +620,28 @@ fn test_nfs_remove() {
 
         // Correctness
         assert!(rm1.is_err());
-        match rm1.err().unwrap() {
-            Error::Application(err) => assert_eq!(err.message, NFSERR_ISDIR),
+        match rm1.map_err(|e| e.into()).err().unwrap() {
+            ZipError::Nfs(ZipErrorType::NFSERR_ISDIR, _) => {}
             _ => assert!(false),
         }
 
         assert!(rm5.is_err());
-        match rm5.err().unwrap() {
-            Error::Application(err) => assert_eq!(err.message, NFSERR_ISDIR),
+        match rm5.map_err(|e| e.into()).err().unwrap() {
+            ZipError::Nfs(ZipErrorType::NFSERR_ISDIR, _) => {}
             _ => assert!(false),
         }
 
         assert!(rm8.is_err());
-        match rm8.err().unwrap() {
-            Error::Application(err) => assert_eq!(err.message, NFSERR_NOENT),
+        match rm8.map_err(|e| e.into()).err().unwrap() {
+            ZipError::Nfs(ZipErrorType::NFSERR_NOENT, _) => {}
             _ => assert!(false),
         }
 
         // Make sure it is actually deleted
         let lookup3 = server.handle_lookup(fake_dir_op_args(2, "zee.txt"));
         assert!(lookup3.is_err());
-        match lookup3.err().unwrap() {
-            Error::Application(err) => assert_eq!(err.message, NFSERR_NOENT),
+        match lookup3.map_err(|e| e.into()).err().unwrap() {
+            ZipError::Nfs(ZipErrorType::NFSERR_NOENT, _) => {}
             _ => assert!(false),
         }
     })

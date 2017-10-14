@@ -1,5 +1,10 @@
 namespace rs zippy
 
+exception ZipException {
+    1: required ZipErrorType error;
+    2: required string message;
+}
+
 enum ZipErrorType {
    NFSERR_NOENT,
    NFSERR_EXIST,
@@ -7,11 +12,6 @@ enum ZipErrorType {
    NFSERR_ISDIR,
    NFSERR_NOTEMPTY,
    NFSERR_STALE,
-}
-
-exception ZipException {
-    1: required ZipErrorType error;
-    2: required string message;
 }
 
 struct ZipTimeVal {
@@ -115,17 +115,17 @@ struct ZipCommitRes{
 
 service Zippynfs {
    void null();
-   ZipAttrStat getattr(1:ZipFileHandle fhandle);
-   ZipAttrStat setattr(1:ZipSattrArgs fsargs);
-   ZipDirOpRes lookup(1:ZipDirOpArgs fsargs);
-   ZipReadRes read(1:ZipReadArgs fsargs);
-   ZipAttrStat write(1:ZipWriteArgs fsargs);
-   ZipDirOpRes create(1:ZipCreateArgs fsargs);
-   void remove(1:ZipDirOpArgs fsargs);
-   void rename(1:ZipRenameArgs fsargs);
-   ZipDirOpRes mkdir(1:ZipCreateArgs fsargs);
-   void rmdir(1:ZipDirOpArgs fsargs);
-   ZipReadDirRes readdir(1:ZipReadDirArgs fsargs);
-   ZipStatFsRes statfs(1:ZipFileHandle fhandle);
-   ZipCommitRes commit(1:ZipCommitArgs fsargs)
+   ZipAttrStat getattr(1:ZipFileHandle fhandle) throws (1: ZipException ex);
+   ZipAttrStat setattr(1:ZipSattrArgs fsargs) throws (1: ZipException ex);
+   ZipDirOpRes lookup(1:ZipDirOpArgs fsargs) throws (1: ZipException ex);
+   ZipReadRes read(1:ZipReadArgs fsargs) throws (1: ZipException ex);
+   ZipAttrStat write(1:ZipWriteArgs fsargs) throws (1: ZipException ex);
+   ZipDirOpRes create(1:ZipCreateArgs fsargs) throws (1: ZipException ex);
+   void remove(1:ZipDirOpArgs fsargs) throws (1: ZipException ex);
+   void rename(1:ZipRenameArgs fsargs) throws (1: ZipException ex);
+   ZipDirOpRes mkdir(1:ZipCreateArgs fsargs) throws (1: ZipException ex);
+   void rmdir(1:ZipDirOpArgs fsargs) throws (1: ZipException ex);
+   ZipReadDirRes readdir(1:ZipReadDirArgs fsargs) throws (1: ZipException ex);
+   ZipStatFsRes statfs(1:ZipFileHandle fhandle) throws (1: ZipException ex);
+   ZipCommitRes commit(1:ZipCommitArgs fsargs) throws (1: ZipException ex);
 }

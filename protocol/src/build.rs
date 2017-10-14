@@ -8,8 +8,7 @@ fn main() {
     let meta_rs = metadata("src/zippynfs.rs");
     let meta_thrift = metadata("src/zippynfs.thrift");
 
-    if meta_rs.is_err() ||
-        meta_thrift.is_err() ||
+    if meta_rs.is_err() || meta_thrift.is_err() ||
         meta_rs.unwrap().modified().unwrap() <= meta_thrift.unwrap().modified().unwrap()
     {
         //println!("cargo:warning=\"Recompiling Thrift\"");

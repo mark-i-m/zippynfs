@@ -1,12 +1,12 @@
 
-use thrift::Error;
+use thrift::{Error, TransportError, ProtocolError, ApplicationError};
 
 use zippynfs::{ZipException, ZipErrorType};
 
 /// Returns a Thrift Error with corresponding NFS error inside.
 pub fn nfs_error(error: ZipErrorType) -> Error {
     ZipException {
-        error,
+        error: Box::new(error),
         message: match error {
             ZipErrorType::NFSERR_STALE => "NFSERR_STALE: Stale file handle".to_owned(),
             ZipErrorType::NFSERR_EXIST => "NFSERR_EXIST: File or directory exists".to_owned(),
@@ -16,4 +16,26 @@ pub fn nfs_error(error: ZipErrorType) -> Error {
             ZipErrorType::NFSERR_NOENT => "NFSERR_NOENT: No such file or directory".to_owned(),
         },
     }.into()
+}
+
+#[derive(Debug)]
+pub enum ZipError {
+    Transport(TransportError),
+    Protocol(ProtocolError),
+    Application(ApplicationError),
+    Nfs(ZipErrorType, String),
+}
+
+impl From<Error> for ZipError {
+    fn from(result: Error) -> ZipError {
+        match result {
+            Error::Transport(te) => ZipError::Transport(te),
+            Error::Protocol(pe) => ZipError::Protocol(pe),
+            Error::Application(ae) => ZipError::Application(ae),
+            Error::User(boxed) => {
+                let ZipException { error, message } = *boxed.downcast().unwrap();
+                ZipError::Nfs(*error, message)
+            }
+        }
+    }
 }
