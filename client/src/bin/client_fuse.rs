@@ -13,7 +13,7 @@ use client::{new_client,ZnfsClient};
 use std::env;
 use fuse::{FileAttr, FileType, Filesystem, Request, ReplyAttr, ReplyData, ReplyEntry, ReplyDirectory};
 use std::path::Path;
-use libc::{ENOENT, ENOSYS,ENOTEMPTY,ENOTDIR, EISDIR,EEXIST,ENAMETOOLONG};
+use libc::{ENOENT,EBADF,ENOSYS,ENOTEMPTY,ENOTDIR, EISDIR,EEXIST,ENAMETOOLONG};
 use std::ffi::{OsStr,OsString};
 use std::string::String;
 use zippyrpc::*;
@@ -84,7 +84,7 @@ impl Filesystem for ZippyFileSystem {
         println!("lookup(parent={}, name={:?})", parent, name);
         let args = ZipDirOpArgs::new(ZipFileHandle::new(parent as i64), name.to_os_string().into_string().unwrap());
         let res = self.znfs.lookup(args).map_err(|e| e.into());
-        println!("Lookup response: {:?}", res);
+        // println!("lookup response: {:?}", res);
         match res{
             Ok(dopres)=>{
                 let lres =  dopres.attributes;
@@ -123,7 +123,7 @@ impl Filesystem for ZippyFileSystem {
         println!("getattr(ino={})", ino);
         let args = ZipFileHandle::new(ino as i64);
         let res = self.znfs.getattr(args).map_err(|e| e.into());
-        println!("Lookup response: {:?}", res);
+        println!("getattr response: {:?}", res);
         match res{
             Ok(resattr)=>{
                 let lres =  resattr.attributes;
@@ -162,14 +162,24 @@ impl Filesystem for ZippyFileSystem {
     fn read(&mut self, _req: &Request, ino: u64, _fh: u64, offset: u64, _size: u32, reply: ReplyData) {
 
         println!("read(ino={}, _fh={}, off={}, _size={})", ino, _fh, offset, _size);
-        reply.error(ENOSYS)
+        let args = ZipReadArgs::new(ZipFileHandle::new(ino as i64), offset as i64, _size as i64);
+        let res = self.znfs.read(args).map_err(|e| e.into());
+        println!("read response: {:?}", res);
+        match res{
+            Ok(resattr)=>{
+               reply.data(resattr.data.as_slice());
+               return;
+            }
+
+            Err(e) => errors!(e,reply),
+        }
     }
 
     fn readdir(&mut self, _req: &Request, ino: u64, _fh: u64, offset: u64, mut reply: ReplyDirectory) {
         println!("readdir(ino={}, _fh={}, off={}", ino, _fh, offset);
         let args = ZipReadDirArgs::new(ZipFileHandle::new(ino as i64));
         let res = self.znfs.readdir(args).map_err(|e| e.into());
-        println!("Lookup response: {:?}", res);
+        println!("readdir response: {:?}", res);
         match res{
             Ok(dirList) => {
                 if offset == 0 {
