@@ -13,7 +13,7 @@ use client::{new_client, ZnfsClient};
 use fuse::{FileAttr, FileType, Filesystem, Request, ReplyAttr, ReplyData, ReplyEntry,
            ReplyDirectory};
 use std::path::Path;
-use libc::{ENOENT, ENOSYS, ENOTEMPTY, ENOTDIR, EISDIR, EEXIST, ENAMETOOLONG, EAGAIN, EIO, c_int};
+use libc::{ENOENT, ENOSYS, ENOTEMPTY, ENOTDIR, EISDIR, EEXIST, ENAMETOOLONG, EIO, c_int};
 
 use std::time::Duration;
 use std::thread::sleep;
@@ -27,6 +27,12 @@ use time::Timespec;
 const TTL: Timespec = Timespec { sec: 1, nsec: 0 }; // 1 second
 const MAX_TRIES: usize = 5;
 
+macro_rules! fn_not_impl {
+    ($reply:ident) => {
+        println!("Function not implimented");
+        $reply.error(ENOSYS);
+    }
+}
 macro_rules! errors {
     ($e:ident, $s:ident) =>{
         match $e {
@@ -319,8 +325,6 @@ impl Filesystem for ZippyFileSystem {
     ) {
 
         println!("setattr(ino={})", _ino);
-        // TODO: Add defalut vaules for the unwrapped option types
-        // TODO: Add size to Zippynfs.thrift to allow truncate
         let newattrs = ZipSattr::new(
             mode.map(|m| m as i16),
             uid.map(|m| m as i64),
@@ -364,6 +368,19 @@ impl Filesystem for ZippyFileSystem {
             }
         }
     }
+
+    fn mkdir(
+        &mut self,
+        _req: &Request,
+        _parent: u64,
+        _name: &OsStr,
+        _mode: u32,
+        reply: ReplyEntry
+        ) {
+    fn_not_impl!{ reply }
+    }
+
+
 }
 
 // Checks if the given address is a valid IP Addr
