@@ -13,17 +13,21 @@ use client::{new_client, ZnfsClient};
 use fuse::{FileAttr, FileType, Filesystem, Request, ReplyAttr, ReplyData, ReplyEntry,
            ReplyDirectory};
 use std::path::Path;
-use libc::{ENOENT, EBADF, ENOSYS, ENOTEMPTY, ENOTDIR, EISDIR, EEXIST, ENAMETOOLONG};
+use libc::{ENOENT, ENOSYS, ENOTEMPTY, ENOTDIR, EISDIR, EEXIST, ENAMETOOLONG, EAGAIN, EIO, c_int};
+
+use std::time::Duration;
+use std::thread::sleep;
 use std::ffi::{OsStr};
 use std::string::String;
 use std::option::Option;
+
 use zippyrpc::*;
 use time::Timespec;
 
 const TTL: Timespec = Timespec { sec: 1, nsec: 0 }; // 1 second
 
 macro_rules! errors {
-    ($e:ident, $r:ident) =>{
+    ($e:ident, $r:ident, $s:ident) =>{
         match $e {
             ZipError::Nfs(ZipErrorType::NFSERR_STALE, msg) =>{
                 println!("NFS stale file handle: {}", msg);
@@ -66,7 +70,33 @@ macro_rules! errors {
                 $r.error(EEXIST);
                 return;
             }
+
+            ZipError::Transport(te) => {
+                println!("Transport error... {:?}", te);
+                sleep(Duration::from_secs(1));
+                match new_client(&$s.server_addr) {
+                    Ok(client) => {$s.znfs = client;
+                        $r.error(EAGAIN);
+                    },
+                    Err(_) => {
+                        $r.error(EIO);
+                    }
+                }
+                return;
+            }
+
             err => println!("Some other error: {:?}", err),
+        }
+    }
+}
+
+macro_rules! match_with_retry {
+    ($self:ident, $reply:ident, $rpc:expr, $ok:pat => $ok_block:block) => {
+        let res = $rpc;
+
+        match res {
+            $ok => $ok_block
+            Err(e) => errors!(e, $reply, $self),
         }
     }
 }
@@ -87,10 +117,61 @@ fn to_zip_time(s_time: Timespec) -> ZipTimeVal {
 
 struct ZippyFileSystem {
     znfs: ZnfsClient,
+    server_addr: String,
 }
+
 impl Filesystem for ZippyFileSystem {
     // TODO: Add functions we need for our flie system bindings
 
+    fn init(&mut self, _req: &Request) -> Result<(), c_int> {
+        Ok(()) // For the future?
+    }
+
+    fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
+        println!("lookup(parent={}, name={:?})", parent, name);
+        let args = ZipDirOpArgs::new(
+            ZipFileHandle::new(parent as i64),
+            name.to_os_string().into_string().unwrap(),
+        );
+        // println!("lookup response: {:?}", res);
+
+        match_with_retry! {
+            self, reply,
+
+            self.znfs.lookup(args).map_err(|e| e.into()),
+
+            Ok(dopres) => {
+                let lres = dopres.attributes;
+                let my_time = to_sys_time(lres.ctime);
+                let attr: FileAttr = FileAttr {
+                    ino: lres.fid as u64,
+                    size: lres.size as u64,
+                    blocks: lres.blocks as u64,
+                    atime: to_sys_time(lres.atime),
+                    mtime: to_sys_time(lres.mtime),
+                    ctime: my_time,
+                    crtime: my_time,
+                    kind: match lres.type_ {
+                        ZipFtype::NFREG => FileType::RegularFile,
+                        ZipFtype::NFDIR => FileType::Directory,
+                        ZipFtype::NFNON => FileType::NamedPipe,
+                        ZipFtype::NFBLK => FileType::BlockDevice,
+                        ZipFtype::NFCHR => FileType::CharDevice,
+                        ZipFtype::NFLNK => FileType::Symlink,
+                    },
+                    perm: lres.mode as u16,
+                    nlink: lres.nlink as u32,
+                    uid: lres.uid as u32,
+                    gid: lres.gid as u32,
+                    rdev: lres.rdev as u32,
+                    flags: 0,
+                };
+                reply.entry(&TTL, &attr, 0);
+                return;
+            }
+        }
+    }
+/*
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         println!("lookup(parent={}, name={:?})", parent, name);
         let args = ZipDirOpArgs::new(
@@ -129,9 +210,10 @@ impl Filesystem for ZippyFileSystem {
                 reply.entry(&TTL, &attr, 0);
                 return;
             }
-            Err(e) => errors!(e, reply),
+            Err(e) => errors!(e, reply, self),
         }
     }
+    */
 
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
         println!("getattr(ino={})", ino);
@@ -169,7 +251,7 @@ impl Filesystem for ZippyFileSystem {
                 return;
             }
 
-            Err(e) => errors!(e, reply),
+            Err(e) => errors!(e, reply, self),
         }
     }
 
@@ -199,7 +281,7 @@ impl Filesystem for ZippyFileSystem {
                 return;
             }
 
-            Err(e) => errors!(e, reply),
+            Err(e) => errors!(e, reply, self),
         }
     }
 
@@ -240,7 +322,7 @@ impl Filesystem for ZippyFileSystem {
                 }
                 reply.ok();
             }
-            Err(e) => errors!(e, reply),
+            Err(e) => errors!(e, reply, self),
         }
     }
 
@@ -306,7 +388,7 @@ impl Filesystem for ZippyFileSystem {
                 return;
             }
 
-            Err(e) => errors!(e, reply),
+            Err(e) => errors!(e, reply, self),
         }
 
     }
@@ -353,7 +435,7 @@ fn run(server_addr: &str, mnt_path: &str) -> Result<(), String> {
     // setup
     let mount_path = Path::new(mnt_path);
 
-    fuse::mount(ZippyFileSystem { znfs }, &mount_path, &[]).unwrap();
+    fuse::mount(ZippyFileSystem { znfs, server_addr: server_addr.to_owned() }, &mount_path, &[]).unwrap();
     // TODO Handle mount erros
 
     Ok(())
