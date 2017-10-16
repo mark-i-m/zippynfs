@@ -13,13 +13,62 @@ use client::{new_client,ZnfsClient};
 use std::env;
 use fuse::{FileAttr, FileType, Filesystem, Request, ReplyAttr, ReplyData, ReplyEntry, ReplyDirectory};
 use std::path::Path;
-use libc::{ENOENT, ENOSYS};
+use libc::{ENOENT, ENOSYS,ENOTEMPTY,ENOTDIR, EISDIR,EEXIST,ENAMETOOLONG};
 use std::ffi::{OsStr,OsString};
 use std::string::String;
 use zippyrpc::*;
 use time::Timespec;
 
 const TTL: Timespec = Timespec { sec: 1, nsec: 0 };                     // 1 second
+
+macro_rules! errors {
+    ($e:ident, $r:ident) =>{
+        match $e {
+            ZipError::Nfs(ZipErrorType::NFSERR_STALE, msg) =>{
+                println!("NFS stale file handle: {}", msg);
+                $r.error(ENOENT);
+                return;
+            }
+
+            ZipError::Nfs(ZipErrorType::NFSERR_NOENT, msg) =>{
+                println!("NFS no such dir or file: {}",msg);
+                $r.error(ENOENT);
+                return;
+            }
+
+            ZipError::Nfs(ZipErrorType::NFSERR_NOTEMPTY, msg) =>{
+                println!("NFS Directory not empty: {}", msg);
+                $r.error(ENOTEMPTY);
+                return;
+            }
+
+            ZipError::Nfs(ZipErrorType::NFSERR_NAMETOOLONG, msg) =>{
+                println!("NFS File name too long: {}", msg);
+                $r.error(ENAMETOOLONG);
+                return;
+            }
+
+            ZipError::Nfs(ZipErrorType::NFSERR_ISDIR, msg) =>{
+                println!("NFS Is a directory: {}", msg);
+                $r.error(EISDIR);
+                return;
+            }
+
+            ZipError::Nfs(ZipErrorType::NFSERR_NOTDIR, msg) =>{
+                println!("NFS Not a directory: {}", msg);
+                $r.error(ENOTDIR);
+                return;
+            }
+
+            ZipError::Nfs(ZipErrorType::NFSERR_EXIST, msg) =>{
+                println!("NFS File exists: {}", msg);
+                $r.error(EEXIST);
+                return;
+            }
+            err => println!("Some other error: {:?}", err),
+        }
+    }
+}
 
 fn to_sys_time( zTime: ZipTimeVal) -> Timespec {
     Timespec {sec: zTime.seconds, nsec: zTime.useconds as i32 }
@@ -34,7 +83,7 @@ impl Filesystem for ZippyFileSystem {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         println!("lookup(parent={}, name={:?})", parent, name);
         let args = ZipDirOpArgs::new(ZipFileHandle::new(parent as i64), name.to_os_string().into_string().unwrap());
-        let res = self.znfs.lookup(args);
+        let res = self.znfs.lookup(args).map_err(|e| e.into());
         println!("Lookup response: {:?}", res);
         match res{
             Ok(dopres)=>{
@@ -66,17 +115,14 @@ impl Filesystem for ZippyFileSystem {
                 reply.entry(&TTL,&attr,0);
                 return;
             }
-            Err(e)=>{
-                println!("Lookup error: {:?}", e);
-                reply.error(ENOENT);
-            }
-        }
+            Err(e) => errors!(e,reply),
+       }
     }
 
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
         println!("getattr(ino={})", ino);
         let args = ZipFileHandle::new(ino as i64);
-        let res = self.znfs.getattr(args);
+        let res = self.znfs.getattr(args).map_err(|e| e.into());
         println!("Lookup response: {:?}", res);
         match res{
             Ok(resattr)=>{
@@ -108,11 +154,8 @@ impl Filesystem for ZippyFileSystem {
                 reply.attr(&TTL,&attr);
                 return;
             }
-            Err(e)=>{
-                println!("Lookup error: {:?}", e);
-                reply.error(ENOENT);
-                return;
-            }
+
+            Err(e) => errors!(e,reply),
         }
     }
 
@@ -171,8 +214,7 @@ fn run(server_addr: &str, mnt_path: &str) -> Result<(), String> {
     let mount_path = Path::new(mnt_path);
 
     fuse::mount(ZippyFileSystem{znfs}, &mount_path,&[]).unwrap();
-
-    // TODO
+    // TODO Handle mount erros
 
     Ok(())
 }

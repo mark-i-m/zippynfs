@@ -12,6 +12,7 @@ enum ZipErrorType {
    NFSERR_ISDIR,
    NFSERR_NOTEMPTY,
    NFSERR_STALE,
+   NFSERR_NAMETOOLONG,
 }
 
 struct ZipTimeVal {
