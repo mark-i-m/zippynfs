@@ -172,15 +172,21 @@ impl Filesystem for ZippyFileSystem {
         println!("Lookup response: {:?}", res);
         match res{
             Ok(dirList) => {
-                for entry in dirList.entries.into_iter(){
-                    reply.add(entry.fid as u64, 0, match entry.type_ {
-                        ZipFtype::NFREG => FileType::RegularFile,
-                        ZipFtype::NFDIR => FileType::Directory,
-                        ZipFtype::NFNON => FileType::NamedPipe,
-                        ZipFtype::NFBLK => FileType::BlockDevice,
-                        ZipFtype::NFCHR => FileType::CharDevice,
-                        ZipFtype::NFLNK => FileType::Symlink,
-                    }, entry.fname);
+                if offset == 0 {
+                    let mut count = 2u64;
+                    reply.add(1, 0, FileType::Directory, &Path::new("."));
+                    reply.add(1, 1, FileType::Directory, &Path::new(".."));
+                    for entry in dirList.entries.into_iter(){
+                        reply.add(entry.fid as u64, count, match entry.type_ {
+                            ZipFtype::NFREG => FileType::RegularFile,
+                            ZipFtype::NFDIR => FileType::Directory,
+                            ZipFtype::NFNON => FileType::NamedPipe,
+                            ZipFtype::NFBLK => FileType::BlockDevice,
+                            ZipFtype::NFCHR => FileType::CharDevice,
+                            ZipFtype::NFLNK => FileType::Symlink,
+                        }, entry.fname);
+                        count += 1;
+                    }
                 }
                 reply.ok();
             }
