@@ -21,11 +21,12 @@ struct ZipTimeVal {
 }
 
 struct ZipSattr {
-    1: required i16 mode;
-    2: required i64 uid;
-    3: required i64 gid;
-    4: required ZipTimeVal atime;
-    5: required ZipTimeVal mtime;
+    1: optional i16 mode;
+    2: optional i64 uid;
+    3: optional i64 gid;
+    4: optional i64 size;
+    5: optional ZipTimeVal atime;
+    6: optional ZipTimeVal mtime;
 }
 
 enum ZipFtype {

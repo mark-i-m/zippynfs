@@ -128,17 +128,12 @@ fn run(server_addr: &str, command: NfsCommand) -> Result<(), ZipError> {
             let args = ZipCreateArgs::new(
                 ZipDirOpArgs::new(ZipFileHandle::new(did as i64), new_dir),
                 ZipSattr::new(
-                    0777, // mode
-                    0, // uid
-                    0, // gid
-                    ZipTimeVal::new(
-                        0, // s
-                        0, // us
-                    ),
-                    ZipTimeVal::new(
-                        0, // s
-                        0, // us
-                    ),
+                    None, // mode
+                    None, // size
+                    None, // uid
+                    None, // gid
+                    None, // atime
+                    None, // mtime
                 ),
             );
 

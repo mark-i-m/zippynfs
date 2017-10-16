@@ -304,12 +304,12 @@ impl Filesystem for ZippyFileSystem {
         &mut self,
         _req: &Request,
         _ino: u64,
-        _mode: Option<u32>,
-        _uid: Option<u32>,
-        _gid: Option<u32>,
-        _size: Option<u64>,
-        _atime: Option<Timespec>,
-        _mtime: Option<Timespec>,
+        mode: Option<u32>,
+        uid: Option<u32>,
+        gid: Option<u32>,
+        size: Option<u64>,
+        atime: Option<Timespec>,
+        mtime: Option<Timespec>,
         _fh: Option<u64>,
         _crtime: Option<Timespec>,
         _chgtime: Option<Timespec>,
@@ -322,11 +322,12 @@ impl Filesystem for ZippyFileSystem {
         // TODO: Add defalut vaules for the unwrapped option types
         // TODO: Add size to Zippynfs.thrift to allow truncate
         let newattrs = ZipSattr::new(
-            _mode.unwrap() as i16,
-            _uid.unwrap() as i64,
-            _gid.unwrap() as i64,
-            to_zip_time(_atime.unwrap()),
-            to_zip_time(_mtime.unwrap()),
+            mode.map(|m| m as i16),
+            uid.map(|m| m as i64),
+            gid.map(|m| m as i64),
+            size.map(|m| m as i64),
+            atime.map(|m| to_zip_time(m)),
+            mtime.map(|m| to_zip_time(m)),
         );
         let args = ZipSattrArgs::new(ZipFileHandle::new(_ino as i64), newattrs);
 
@@ -360,7 +361,6 @@ impl Filesystem for ZippyFileSystem {
                     flags: 0,
                 };
                 reply.attr(&TTL, &attr);
-                return;
             }
         }
     }
