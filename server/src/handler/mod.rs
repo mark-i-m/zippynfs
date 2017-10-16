@@ -407,7 +407,7 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
     }
 
     /// Get a set of `(fid, name)` for all entries in the given directory.
-    fn fs_read_dir(&self, dpath: PathBuf) -> Result<HashSet<(u64, String)>, String> {
+    fn fs_read_dir(&self, dpath: PathBuf) -> Result<HashSet<(u64, String, ZipFtype)>, String> {
         let re = Regex::new(NUMBERED_FILE_RE).unwrap();
         let (numbered_files, named_files) = self.get_numbered_and_named_files(&re, &dpath)?;
 
@@ -421,7 +421,14 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
                     let name = named_file.next().unwrap();
 
                     let numbered_file = fname.parent().unwrap().join(number);
-                    (numbered_file, (number.parse().unwrap(), name.to_owned()))
+
+                    let ftype = if numbered_file.is_dir() {
+                        ZipFtype::NFDIR
+                    } else {
+                        ZipFtype::NFREG
+                    };
+
+                    (numbered_file, (number.parse().unwrap(), name.to_owned(), ftype))
                 })
                 .filter(|&(ref numbered_file, _)| {
                     numbered_files.contains(numbered_file)
@@ -857,7 +864,7 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
         Ok(ZipReadDirRes::new(
             contents
                 .into_iter()
-                .map(|(fid, fname)| ZipDirEntry::new(fid as i64, fname))
+                .map(|(fid, fname, ftype)| ZipDirEntry::new(fid as i64, fname, ftype))
                 .collect(),
         ))
     }

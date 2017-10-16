@@ -95,6 +95,7 @@ struct ZipReadDirArgs{
 struct ZipDirEntry {
     1: required i64 fid;
     2: required string fname;
+    3: required ZipFtype type;
 }
 
 struct ZipReadDirRes{

@@ -167,7 +167,25 @@ impl Filesystem for ZippyFileSystem {
 
     fn readdir(&mut self, _req: &Request, ino: u64, _fh: u64, offset: u64, mut reply: ReplyDirectory) {
         println!("readdir(ino={}, _fh={}, off={}", ino, _fh, offset);
-        reply.error(ENOSYS)
+        let args = ZipReadDirArgs::new(ZipFileHandle::new(ino as i64));
+        let res = self.znfs.readdir(args).map_err(|e| e.into());
+        println!("Lookup response: {:?}", res);
+        match res{
+            Ok(dirList) => {
+                for entry in dirList.entries.into_iter(){
+                    reply.add(entry.fid as u64, 0, match entry.type_ {
+                        ZipFtype::NFREG => FileType::RegularFile,
+                        ZipFtype::NFDIR => FileType::Directory,
+                        ZipFtype::NFNON => FileType::NamedPipe,
+                        ZipFtype::NFBLK => FileType::BlockDevice,
+                        ZipFtype::NFCHR => FileType::CharDevice,
+                        ZipFtype::NFLNK => FileType::Symlink,
+                    }, entry.fname);
+                }
+                reply.ok();
+            }
+            Err(e) => errors!(e,reply),
+        }
     }
 
 }

@@ -731,15 +731,15 @@ fn test_nfs_readdir() {
         // Correctness
         match readdir0 {
             Ok(ZipReadDirRes { entries }) => {
-                let correct_entries: HashSet<(u64, String)> =
-                    vec![(1, "foo"), (4, "baz.txt"), (5, "bazee")]
+                let correct_entries: HashSet<(u64, String, ZipFtype)> =
+                    vec![(1, "foo", ZipFtype::NFDIR), (4, "baz.txt", ZipFtype::NFREG), (5, "bazee", ZipFtype::NFDIR)]
                         .into_iter()
-                        .map(|(fid, fname)| (fid, fname.to_owned()))
+                        .map(|(fid, fname, ftype)| (fid, fname.to_owned(), ftype))
                         .collect();
 
                 let actual_entries = entries
                     .into_iter()
-                    .map(|ZipDirEntry { fid, fname }| (fid as u64, fname))
+                    .map(|ZipDirEntry { fid, fname, type_ }| (fid as u64, fname, type_))
                     .collect();
 
                 // Same set
