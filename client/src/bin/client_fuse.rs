@@ -90,12 +90,20 @@ macro_rules! match_with_retry {
         let mut result: Option<Result<_, ()>> = None;
 
         while should_try && tries < MAX_TRIES {
+            // Attempt to make the RPC call
             let (st, le) = match $rpc {
                 Ok(val) => { result = Some(Ok(val)); (false, None) }
                 Err(e) => errors!(e, $self),
             };
+
             should_try = st;
             libc_err = le;
+
+            // Backoff before retrying
+            if should_try {
+                sleep(Duration::from_secs(1 << tries));
+            }
+
             tries += 1;
         }
 
@@ -103,6 +111,8 @@ macro_rules! match_with_retry {
             libc_err = Some(EIO);
         }
 
+        // If we failed to make the RPC call return an error to FUSE.
+        // Else, call the handling code passed to the macro.
         if let Some(libc_err) = libc_err {
             $reply.error(libc_err);
         } else {
