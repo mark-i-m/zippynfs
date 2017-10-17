@@ -17,7 +17,7 @@ use libc::{ENOENT, ENOSYS, ENOTEMPTY, ENOTDIR, EISDIR, EEXIST, ENAMETOOLONG, EIO
 
 use std::time::Duration;
 use std::thread::sleep;
-use std::ffi::{OsStr};
+use std::ffi::OsStr;
 use std::string::String;
 use std::option::Option;
 
@@ -424,8 +424,15 @@ fn run(server_addr: &str, mnt_path: &str) -> Result<(), String> {
     // setup
     let mount_path = Path::new(mnt_path);
 
-    fuse::mount(ZippyFileSystem { znfs, server_addr: server_addr.to_owned() }, &mount_path, &[]).unwrap();
-    // TODO Handle mount erros
+    fuse::mount(
+        ZippyFileSystem {
+            znfs,
+            server_addr: server_addr.to_owned(),
+        },
+        &mount_path,
+        &[],
+    ).unwrap();
+    // TODO Handle mount errors
 
     Ok(())
 }
