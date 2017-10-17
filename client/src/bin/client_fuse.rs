@@ -10,9 +10,8 @@ extern crate zippyrpc;
 
 use std::process::exit;
 use client::{new_client, ZnfsClient};
-use fuse::{FileAttr, FileType, Filesystem, Request, ReplyAttr, ReplyBmap, ReplyCreate, ReplyData,
-           ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyLock, ReplyOpen, ReplyStatfs, ReplyWrite,
-           ReplyXattr};
+use fuse::{FileAttr, FileType, Filesystem, Request, ReplyAttr, ReplyCreate, ReplyData,
+           ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyStatfs, ReplyWrite};
 use std::path::Path;
 use libc::{ENOENT, ENOSYS, ENOTEMPTY, ENOTDIR, EISDIR, EEXIST, ENAMETOOLONG, EIO, c_int};
 
@@ -439,13 +438,68 @@ impl Filesystem for ZippyFileSystem {
     fn create(
         &mut self,
         _req: &Request,
-        _parent: u64,
-        _name: &OsStr,
-        _mode: u32,
-        _flags: u32,
+        parent: u64,
+        name: &OsStr,
+        mode: u32,
+        flags: u32,
         reply: ReplyCreate,
     ) {
-        fn_not_impl!(reply);
+         println!(
+            "create(parent={}, _name={:?}, _mode={}, flags={})",
+            parent,
+            name,
+            mode,
+            flags,
+            );
+
+        let time_now = get_time();
+
+        let attrs = ZipSattr::new(
+            Some(mode).map(|m| m as i16),
+            Some(_req.uid()).map(|m| m as i64),
+            Some(_req.gid()).map(|m| m as i64),
+            None,
+            Some(to_zip_time(time_now)),
+            Some(to_zip_time(time_now)),
+        );
+
+        let dir_args = ZipDirOpArgs::new(ZipFileHandle::new(parent as i64),
+                                         name.to_os_string().into_string().unwrap());
+        let args = ZipCreateArgs::new(dir_args,attrs);
+
+        match_with_retry! {
+            self, reply,
+            self.znfs.create(args.clone()).map_err(|e| e.into()),
+            Ok(dopres) => {
+                let lres = dopres.attributes;
+                let my_time = to_sys_time(lres.ctime);
+                let attr: FileAttr = FileAttr {
+                    ino: lres.fid as u64,
+                    size: lres.size as u64,
+                    blocks: lres.blocks as u64,
+                    atime: to_sys_time(lres.atime),
+                    mtime: to_sys_time(lres.mtime),
+                    ctime: my_time,
+                    crtime: my_time,
+                    kind: match lres.type_ {
+                        ZipFtype::NFREG => FileType::RegularFile,
+                        ZipFtype::NFDIR => FileType::Directory,
+                        ZipFtype::NFNON => FileType::NamedPipe,
+                        ZipFtype::NFBLK => FileType::BlockDevice,
+                        ZipFtype::NFCHR => FileType::CharDevice,
+                        ZipFtype::NFLNK => FileType::Symlink,
+                    },
+                    perm: lres.mode as u16,
+                    nlink: lres.nlink as u32,
+                    uid: lres.uid as u32,
+                    gid: lres.gid as u32,
+                    rdev: lres.rdev as u32,
+                    flags: flags,
+                };
+
+                reply.created(&TTL, &attr,0u64,dopres.file.fid as u64,flags);
+            }
+         }
     }
 
 
