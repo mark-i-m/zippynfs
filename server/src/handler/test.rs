@@ -29,8 +29,8 @@ where
 {
     use std::fs::remove_file;
 
-    remove_file((&fspath).as_ref().join("0/5/32.empty")).unwrap();
-    remove_file((&fspath).as_ref().join("0/6/33.empty")).unwrap();
+    remove_file((&fspath).as_ref().join("1/5/32.empty")).unwrap();
+    remove_file((&fspath).as_ref().join("1/6/33.empty")).unwrap();
     remove_file((&fspath).as_ref().join("tmp/0")).unwrap();
 }
 
@@ -105,21 +105,21 @@ fn test_atomic_persistent_usize() {
         {
             let counter = AtomicPersistentUsize::from_file(fspath.join("counter")).unwrap();
 
-            assert_eq!(counter.fetch_inc(), 8);
             assert_eq!(counter.fetch_inc(), 9);
             assert_eq!(counter.fetch_inc(), 10);
             assert_eq!(counter.fetch_inc(), 11);
             assert_eq!(counter.fetch_inc(), 12);
+            assert_eq!(counter.fetch_inc(), 13);
         } // Close file
 
         {
             let counter = AtomicPersistentUsize::from_file(fspath.join("counter")).unwrap();
 
-            assert_eq!(counter.fetch_inc(), 13);
             assert_eq!(counter.fetch_inc(), 14);
             assert_eq!(counter.fetch_inc(), 15);
             assert_eq!(counter.fetch_inc(), 16);
             assert_eq!(counter.fetch_inc(), 17);
+            assert_eq!(counter.fetch_inc(), 18);
         } // Close file
     })
 }
@@ -162,14 +162,14 @@ fn test_atomic_persistent_usize_concurrent() {
         // Correctness
 
         // Last value is written
-        assert_eq!(counter.fetch_inc(), 1008);
+        assert_eq!(counter.fetch_inc(), 1009);
 
         // Sort values each thread got
         counts.sort();
 
         // All children got unique values
         for i in 0..NTHREADS {
-            assert_eq!(counts[i], i + 8);
+            assert_eq!(counts[i], i + 9);
         }
     })
 }
@@ -189,21 +189,21 @@ fn test_get_numbered_and_named_files() {
         let server = ZippynfsServer::new(fspath);
 
         let re = Regex::new(r"^\d+$").unwrap();
-        let path = fspath.join("0");
+        let path = fspath.join("1");
         let (numbered_files, named_files) =
             server.get_numbered_and_named_files(&re, &path).unwrap();
         assert_eq!(numbered_files.len(), 4);
         assert_eq!(named_files.len(), 4);
 
-        assert!(numbered_files.contains(&fspath.join("0/1")));
-        assert!(numbered_files.contains(&fspath.join("0/4")));
-        assert!(numbered_files.contains(&fspath.join("0/5")));
-        assert!(numbered_files.contains(&fspath.join("0/6")));
+        assert!(numbered_files.contains(&fspath.join("1/8")));
+        assert!(numbered_files.contains(&fspath.join("1/4")));
+        assert!(numbered_files.contains(&fspath.join("1/5")));
+        assert!(numbered_files.contains(&fspath.join("1/6")));
 
-        assert!(named_files.contains(&fspath.join("0/1.foo")));
-        assert!(named_files.contains(&fspath.join("0/4.baz.txt")));
-        assert!(named_files.contains(&fspath.join("0/5.bazee")));
-        assert!(named_files.contains(&fspath.join("0/7.deleted.txt")));
+        assert!(named_files.contains(&fspath.join("1/8.foo")));
+        assert!(named_files.contains(&fspath.join("1/4.baz.txt")));
+        assert!(named_files.contains(&fspath.join("1/5.bazee")));
+        assert!(named_files.contains(&fspath.join("1/7.deleted.txt")));
     })
 }
 
@@ -214,8 +214,8 @@ fn test_fs_find_by_fid() {
         let server = ZippynfsServer::new(fspath);
 
         // then do a bunch of find_by_ids and verify the results
-        let path0 = server.fs_find_by_fid(0);
         let path1 = server.fs_find_by_fid(1);
+        let path8 = server.fs_find_by_fid(8);
         let path2 = server.fs_find_by_fid(2);
         let path3 = server.fs_find_by_fid(3);
         let path4 = server.fs_find_by_fid(4);
@@ -224,12 +224,12 @@ fn test_fs_find_by_fid() {
         let path7 = server.fs_find_by_fid(7);
 
         // Correctness
-        assert_eq!(path0, Ok(Some(fspath.join("0"))));
-        assert_eq!(path1, Ok(Some(fspath.join("0/1"))));
-        assert_eq!(path2, Ok(Some(fspath.join("0/1/2"))));
-        assert_eq!(path3, Ok(Some(fspath.join("0/1/2/3"))));
-        assert_eq!(path4, Ok(Some(fspath.join("0/4"))));
-        assert_eq!(path5, Ok(Some(fspath.join("0/5"))));
+        assert_eq!(path1, Ok(Some(fspath.join("1"))));
+        assert_eq!(path8, Ok(Some(fspath.join("1/8"))));
+        assert_eq!(path2, Ok(Some(fspath.join("1/8/2"))));
+        assert_eq!(path3, Ok(Some(fspath.join("1/8/2/3"))));
+        assert_eq!(path4, Ok(Some(fspath.join("1/4"))));
+        assert_eq!(path5, Ok(Some(fspath.join("1/5"))));
         assert_eq!(path6, Ok(None));
         assert_eq!(path7, Ok(None));
     })
@@ -242,23 +242,23 @@ fn test_fs_find_by_name() {
         let server = ZippynfsServer::new(fspath);
 
         // Look for a bunch of stuff, and make sure we get the right results
-        let find1 = server.fs_find_by_name(fspath.join("0"), "foo");
-        let find2 = server.fs_find_by_name(fspath.join("0/1"), "bar");
-        let find3 = server.fs_find_by_name(fspath.join("0/1/2"), "zee.txt");
-        let find4 = server.fs_find_by_name(fspath.join("0"), "baz.txt");
-        let find5 = server.fs_find_by_name(fspath.join("0"), "bazee");
-        let find7 = server.fs_find_by_name(fspath.join("0"), "deleted.txt");
-        let find8 = server.fs_find_by_name(fspath.join("0"), ".");
-        let find9 = server.fs_find_by_name(fspath.join("0"), "fignewton");
+        let find8 = server.fs_find_by_name(fspath.join("1"), "foo");
+        let find2 = server.fs_find_by_name(fspath.join("1/8"), "bar");
+        let find3 = server.fs_find_by_name(fspath.join("1/8/2"), "zee.txt");
+        let find4 = server.fs_find_by_name(fspath.join("1"), "baz.txt");
+        let find5 = server.fs_find_by_name(fspath.join("1"), "bazee");
+        let find7 = server.fs_find_by_name(fspath.join("1"), "deleted.txt");
+        let find9 = server.fs_find_by_name(fspath.join("1"), "fignewton");
+        let find10 = server.fs_find_by_name(fspath.join("1"), ".");
 
         // Correctness
-        assert_eq!(find1, Ok(Some(1)));
+        assert_eq!(find8, Ok(Some(8)));
         assert_eq!(find2, Ok(Some(2)));
         assert_eq!(find3, Ok(Some(3)));
         assert_eq!(find4, Ok(Some(4)));
         assert_eq!(find5, Ok(Some(5)));
         assert_eq!(find7, Ok(None));
-        assert_eq!(find8, Ok(None));
+        assert_eq!(find10, Ok(None));
         assert_eq!(find9, Ok(None));
     })
 }
@@ -270,16 +270,16 @@ fn test_fs_get_attr() {
         let server = ZippynfsServer::new(fspath);
 
         // Get attributes for a bunch of files
-        let attr0 = server.fs_get_attr(fspath.join("0"), 0);
-        let attr1 = server.fs_get_attr(fspath.join("0/1"), 1);
-        let attr2 = server.fs_get_attr(fspath.join("0/1/2"), 2);
-        let attr3 = server.fs_get_attr(fspath.join("0/1/2/3"), 3);
-        let attr4 = server.fs_get_attr(fspath.join("0/4"), 4);
-        let attr5 = server.fs_get_attr(fspath.join("0/5"), 5);
+        let attr1 = server.fs_get_attr(fspath.join("1"), 1);
+        let attr8 = server.fs_get_attr(fspath.join("1/8"), 8);
+        let attr2 = server.fs_get_attr(fspath.join("1/8/2"), 2);
+        let attr3 = server.fs_get_attr(fspath.join("1/8/2/3"), 3);
+        let attr4 = server.fs_get_attr(fspath.join("1/4"), 4);
+        let attr5 = server.fs_get_attr(fspath.join("1/5"), 5);
 
         // Correctness
-        assert_eq!(attr0.fid, 0);
         assert_eq!(attr1.fid, 1);
+        assert_eq!(attr8.fid, 8);
         assert_eq!(attr2.fid, 2);
         assert_eq!(attr3.fid, 3);
         assert_eq!(attr4.fid, 4);
@@ -289,8 +289,8 @@ fn test_fs_get_attr() {
         assert_eq!(attr3.size, 27);
         assert_eq!(attr4.size, 0);
 
-        assert_eq!(attr0.type_, ZipFtype::NFDIR);
         assert_eq!(attr1.type_, ZipFtype::NFDIR);
+        assert_eq!(attr8.type_, ZipFtype::NFDIR);
         assert_eq!(attr2.type_, ZipFtype::NFDIR);
         assert_eq!(attr3.type_, ZipFtype::NFREG);
         assert_eq!(attr4.type_, ZipFtype::NFREG);
@@ -305,17 +305,17 @@ fn test_nfs_lookup() {
         let server = ZippynfsServer::new(fspath);
 
         // LOOKUP a bunch of things
-        let lookup1 = server.handle_lookup(fake_dir_op_args(0, "foo")).unwrap();
-        let lookup2 = server.handle_lookup(fake_dir_op_args(1, "bar")).unwrap();
+        let lookup8 = server.handle_lookup(fake_dir_op_args(1, "foo")).unwrap();
+        let lookup2 = server.handle_lookup(fake_dir_op_args(8, "bar")).unwrap();
         let lookup3 = server
             .handle_lookup(fake_dir_op_args(2, "zee.txt"))
             .unwrap();
         let lookup4 = server
-            .handle_lookup(fake_dir_op_args(0, "baz.txt"))
+            .handle_lookup(fake_dir_op_args(1, "baz.txt"))
             .unwrap();
-        let lookup5 = server.handle_lookup(fake_dir_op_args(0, "bazee")).unwrap();
-        let lookup7 = server.handle_lookup(fake_dir_op_args(0, "deleted.txt"));
-        let lookup8 = server.handle_lookup(fake_dir_op_args(1, "foo"));
+        let lookup5 = server.handle_lookup(fake_dir_op_args(1, "bazee")).unwrap();
+        let lookup7 = server.handle_lookup(fake_dir_op_args(1, "deleted.txt"));
+        let lookup9 = server.handle_lookup(fake_dir_op_args(8, "foo"));
 
         // Correctness
         assert!(lookup7.is_err());
@@ -324,13 +324,13 @@ fn test_nfs_lookup() {
             _ => assert!(false),
         }
 
-        assert!(lookup8.is_err());
-        match lookup8.map_err(|e| e.into()).err().unwrap() {
+        assert!(lookup9.is_err());
+        match lookup9.map_err(|e| e.into()).err().unwrap() {
             ZipError::Nfs(ZipErrorType::NFSERR_NOENT, _) => {}
             _ => assert!(false),
         }
 
-        assert_eq!(lookup1.file.fid, 1);
+        assert_eq!(lookup8.file.fid, 8);
         assert_eq!(lookup2.file.fid, 2);
         assert_eq!(lookup3.file.fid, 3);
         assert_eq!(lookup4.file.fid, 4);
@@ -340,13 +340,13 @@ fn test_nfs_lookup() {
         assert_eq!(lookup3.attributes.size, 27);
         assert_eq!(lookup4.attributes.size, 0);
 
-        assert_eq!(lookup1.attributes.fid, 1);
+        assert_eq!(lookup8.attributes.fid, 8);
         assert_eq!(lookup2.attributes.fid, 2);
         assert_eq!(lookup3.attributes.fid, 3);
         assert_eq!(lookup4.attributes.fid, 4);
         assert_eq!(lookup5.attributes.fid, 5);
 
-        assert_eq!(lookup1.attributes.type_, ZipFtype::NFDIR);
+        assert_eq!(lookup8.attributes.type_, ZipFtype::NFDIR);
         assert_eq!(lookup2.attributes.type_, ZipFtype::NFDIR);
         assert_eq!(lookup3.attributes.type_, ZipFtype::NFREG);
         assert_eq!(lookup4.attributes.type_, ZipFtype::NFREG);
@@ -401,14 +401,14 @@ fn test_nfs_getattr() {
         let server = ZippynfsServer::new(fspath);
 
         // LOOKUP a bunch of things
-        let attr1 = server.handle_getattr(ZipFileHandle::new(1)).unwrap();
+        let attr8 = server.handle_getattr(ZipFileHandle::new(8)).unwrap();
         let attr2 = server.handle_getattr(ZipFileHandle::new(2)).unwrap();
         let attr3 = server.handle_getattr(ZipFileHandle::new(3)).unwrap();
         let attr4 = server.handle_getattr(ZipFileHandle::new(4)).unwrap();
         let attr5 = server.handle_getattr(ZipFileHandle::new(5)).unwrap();
         let attr6 = server.handle_getattr(ZipFileHandle::new(6));
         let attr7 = server.handle_getattr(ZipFileHandle::new(7));
-        let attr8 = server.handle_getattr(ZipFileHandle::new(8));
+        let attr9 = server.handle_getattr(ZipFileHandle::new(9));
 
         // Correctness
         assert!(attr6.is_err());
@@ -423,20 +423,20 @@ fn test_nfs_getattr() {
             _ => assert!(false),
         }
 
-        assert!(attr8.is_err());
-        match attr8.map_err(|e| e.into()).err().unwrap() {
+        assert!(attr9.is_err());
+        match attr9.map_err(|e| e.into()).err().unwrap() {
             ZipError::Nfs(ZipErrorType::NFSERR_STALE, _) => {}
             _ => assert!(false),
         }
 
         // For the two files
-        assert_eq!(attr1.attributes.fid, 1);
+        assert_eq!(attr8.attributes.fid, 8);
         assert_eq!(attr2.attributes.fid, 2);
         assert_eq!(attr3.attributes.fid, 3);
         assert_eq!(attr4.attributes.fid, 4);
         assert_eq!(attr5.attributes.fid, 5);
 
-        assert_eq!(attr1.attributes.type_, ZipFtype::NFDIR);
+        assert_eq!(attr8.attributes.type_, ZipFtype::NFDIR);
         assert_eq!(attr2.attributes.type_, ZipFtype::NFDIR);
         assert_eq!(attr3.attributes.type_, ZipFtype::NFREG);
         assert_eq!(attr4.attributes.type_, ZipFtype::NFREG);
@@ -451,33 +451,33 @@ fn test_fs_create_obj() {
         let server = ZippynfsServer::new(fspath);
 
         // Check that objects do not exist
-        assert!(!fspath.join("0/9").exists());
-        assert!(!fspath.join("0/9.myfile.txt").exists());
-        assert!(!fspath.join("0/10").exists());
-        assert!(!fspath.join("0/10.mydir").exists());
+        assert!(!fspath.join("1/10").exists());
+        assert!(!fspath.join("1/10.myfile.txt").exists());
+        assert!(!fspath.join("1/11").exists());
+        assert!(!fspath.join("1/11.mydir").exists());
 
         // Create a couple of objects
         let create1 = server
-            .fs_create_obj(fspath.join("0"), "myfile.txt", true)
+            .fs_create_obj(fspath.join("1"), "myfile.txt", true)
             .unwrap(); // file
         let create2 = server
-            .fs_create_obj(fspath.join("0"), "mydir", false)
+            .fs_create_obj(fspath.join("1"), "mydir", false)
             .unwrap(); // dir
         // TODO: possibly add more tests
 
         // Correctness
-        assert_eq!(create1, (9, fspath.join("0/9")));
-        assert_eq!(create2, (10, fspath.join("0/10")));
+        assert_eq!(create1, (10, fspath.join("1/10")));
+        assert_eq!(create2, (11, fspath.join("1/11")));
 
         // Check that they exist
-        assert!(fspath.join("0/9").exists());
-        assert!(fspath.join("0/9").is_file());
-        assert!(fspath.join("0/9.myfile.txt").exists());
-        assert!(fspath.join("0/9.myfile.txt").is_file());
-        assert!(fspath.join("0/10").exists());
-        assert!(fspath.join("0/10").is_dir());
-        assert!(fspath.join("0/10.mydir").exists());
-        assert!(fspath.join("0/10.mydir").is_file());
+        assert!(fspath.join("1/10").exists());
+        assert!(fspath.join("1/10").is_file());
+        assert!(fspath.join("1/10.myfile.txt").exists());
+        assert!(fspath.join("1/10.myfile.txt").is_file());
+        assert!(fspath.join("1/11").exists());
+        assert!(fspath.join("1/11").is_dir());
+        assert!(fspath.join("1/11.mydir").exists());
+        assert!(fspath.join("1/11.mydir").is_file());
     })
 }
 
@@ -488,13 +488,13 @@ fn create_object(is_file: bool) {
 
         // Call create_object repeatedly
         let create1 = server
-            .create_object(fake_create_args(0, "myobj"), is_file)
+            .create_object(fake_create_args(1, "myobj"), is_file)
             .unwrap();
-        let create2 = server.create_object(fake_create_args(0, "foo"), is_file);
+        let create2 = server.create_object(fake_create_args(1, "foo"), is_file);
         let create3 = server.create_object(fake_create_args(2, "zee.txt"), is_file);
 
         // Correctness
-        assert_eq!(create1.file.fid, 9);
+        assert_eq!(create1.file.fid, 10);
 
         assert!(create2.is_err());
         match create2.map_err(|e| e.into()).err().unwrap() {
@@ -526,11 +526,11 @@ fn create_object_concurrent(is_file: bool) {
 
     // Populate the new directory
     create_dir(&fspath).unwrap();
-    File::create(fspath.join("0.root")).unwrap();
-    create_dir(fspath.join("0")).unwrap();
+    File::create(fspath.join("1.root")).unwrap();
+    create_dir(fspath.join("1")).unwrap();
     File::create(fspath.join("counter"))
         .unwrap()
-        .write(&[1, 0, 0, 0, 0, 0, 0, 0])
+        .write(&[2, 0, 0, 0, 0, 0, 0, 0])
         .unwrap();
 
     // If this is 1000, then initial remove_dir_all() or child.join() fail
@@ -545,7 +545,7 @@ fn create_object_concurrent(is_file: bool) {
         for _ in 0..NTHREADS {
             let server = server.clone();
             children.push(thread::spawn(move || {
-                let _ = server.create_object(fake_create_args(0, "myobj"), is_file);
+                let _ = server.create_object(fake_create_args(1, "myobj"), is_file);
             }));
         }
 
@@ -558,12 +558,12 @@ fn create_object_concurrent(is_file: bool) {
     }
 
     // Only one numbered file and named file got created
-    assert!(fspath.join("0/2.myobj").exists());
-    assert!(fspath.join("0/2").exists());
+    assert!(fspath.join("1/3.myobj").exists());
+    assert!(fspath.join("1/3").exists());
     for i in 1..NTHREADS {
-        if i != 2 {
-            assert!(!fspath.join(format!("0/{}.myobj", i)).exists());
-            assert!(!fspath.join(format!("0/{}", i)).exists());
+        if i != 3 {
+            assert!(!fspath.join(format!("1/{}.myobj", i)).exists());
+            assert!(!fspath.join(format!("1/{}", i)).exists());
         }
     }
 
@@ -601,16 +601,18 @@ fn test_fs_delete_obj() {
         let server = ZippynfsServer::new(fspath);
 
         // Delete a couple of items
-        let del4 = server.fs_delete_obj(fspath.join("0"), 4, "baz.txt", true); // file
-        let del5 = server.fs_delete_obj(fspath.join("0"), 5, "bazee", false); // dir
+        server
+            .fs_delete_obj(fspath.join("1"), 4, "baz.txt", true)
+            .unwrap(); // file
+        server
+            .fs_delete_obj(fspath.join("1"), 5, "bazee", false)
+            .unwrap(); // dir
 
         // Correctness
-        assert_eq!(del4.ok().unwrap(), ());
-        assert_eq!(del5.ok().unwrap(), ());
 
         // Check that they no longer exist
-        let lookup4 = server.handle_lookup(fake_dir_op_args(0, "baz.txt"));
-        let lookup5 = server.handle_lookup(fake_dir_op_args(0, "bazee"));
+        let lookup4 = server.handle_lookup(fake_dir_op_args(1, "baz.txt"));
+        let lookup5 = server.handle_lookup(fake_dir_op_args(1, "bazee"));
 
         assert!(lookup4.is_err());
         match lookup4.map_err(|e| e.into()).err().unwrap() {
@@ -636,10 +638,10 @@ fn test_nfs_rmdir() {
         let server = ZippynfsServer::new(fspath);
 
         // Call RMDIR
-        let rmdir1 = server.handle_rmdir(fake_dir_op_args(0, "foo"));
+        let rmdir1 = server.handle_rmdir(fake_dir_op_args(1, "foo"));
         let rmdir3 = server.handle_rmdir(fake_dir_op_args(2, "zee.txt"));
-        let _rmdir5 = server.handle_rmdir(fake_dir_op_args(0, "bazee")).unwrap();
-        let rmdir8 = server.handle_rmdir(fake_dir_op_args(0, "baz"));
+        let _rmdir5 = server.handle_rmdir(fake_dir_op_args(1, "bazee")).unwrap();
+        let rmdir8 = server.handle_rmdir(fake_dir_op_args(1, "baz"));
 
         // Correctness
         assert!(rmdir1.is_err());
@@ -661,7 +663,7 @@ fn test_nfs_rmdir() {
         }
 
         // Make sure it is actually deleted
-        let lookup5 = server.handle_lookup(fake_dir_op_args(0, "bazee"));
+        let lookup5 = server.handle_lookup(fake_dir_op_args(1, "bazee"));
         assert!(lookup5.is_err());
         match lookup5.map_err(|e| e.into()).err().unwrap() {
             ZipError::Nfs(ZipErrorType::NFSERR_NOENT, _) => {}
@@ -680,12 +682,12 @@ fn test_nfs_remove() {
         let server = ZippynfsServer::new(fspath);
 
         // Call RMDIR
-        let rm1 = server.handle_remove(fake_dir_op_args(0, "foo"));
+        let rm1 = server.handle_remove(fake_dir_op_args(1, "foo"));
         let _rm3 = server
             .handle_remove(fake_dir_op_args(2, "zee.txt"))
             .unwrap();
-        let rm5 = server.handle_remove(fake_dir_op_args(0, "bazee"));
-        let rm8 = server.handle_remove(fake_dir_op_args(0, "baz"));
+        let rm5 = server.handle_remove(fake_dir_op_args(1, "bazee"));
+        let rm8 = server.handle_remove(fake_dir_op_args(1, "baz"));
 
         // Correctness
         assert!(rm1.is_err());
@@ -726,14 +728,14 @@ fn test_nfs_readdir() {
         let server = ZippynfsServer::new(fspath);
 
         // Call RMDIR
-        let readdir0 = server.handle_readdir(ZipReadDirArgs::new(ZipFileHandle::new(0)));
+        let readdir1 = server.handle_readdir(ZipReadDirArgs::new(ZipFileHandle::new(1)));
 
         // Correctness
-        match readdir0 {
+        match readdir1 {
             Ok(ZipReadDirRes { entries }) => {
                 let correct_entries: HashSet<(u64, String, ZipFtype)> =
                     vec![
-                        (1, "foo", ZipFtype::NFDIR),
+                        (8, "foo", ZipFtype::NFDIR),
                         (4, "baz.txt", ZipFtype::NFREG),
                         (5, "bazee", ZipFtype::NFDIR),
                     ].into_iter()
@@ -765,58 +767,58 @@ fn test_nfs_rename_easy() {
 
         // 1. file that exists to new file
         let _move3 = server
-            .handle_rename(fake_rename_args(2, "zee.txt", 1, "zee.mv.txt"))
+            .handle_rename(fake_rename_args(2, "zee.txt", 8, "zee.mv.txt"))
             .unwrap();
 
         // 2. dir that exists to new dir
-        let _move1 = server
-            .handle_rename(fake_rename_args(0, "foo", 5, "foo.mv"))
+        let _move8 = server
+            .handle_rename(fake_rename_args(1, "foo", 5, "foo.mv"))
             .unwrap();
 
         // 3. file that doesn't exist
-        let move3_again = server.handle_rename(fake_rename_args(2, "zee.txt", 1, "zee.mv.txt"));
+        let move3_again = server.handle_rename(fake_rename_args(2, "zee.txt", 8, "zee.mv.txt"));
 
         // 4. dir that doesn't exist
-        let move1_again = server.handle_rename(fake_rename_args(0, "foo", 5, "foo.mv"));
+        let move8_again = server.handle_rename(fake_rename_args(1, "foo", 5, "foo.mv"));
 
         // 5. file that does exists to dir that doesn't
         let move3_again2 =
-            server.handle_rename(fake_rename_args(1, "zee.mv.txt", 6, "zee.mv.again2.txt"));
+            server.handle_rename(fake_rename_args(8, "zee.mv.txt", 6, "zee.mv.again2.txt"));
 
         // 6. dir that does exists to dir that doesn't
-        let move1_again2 = server.handle_rename(fake_rename_args(5, "foo.mv", 6, "foo.mv.again2"));
+        let move8_again2 = server.handle_rename(fake_rename_args(5, "foo.mv", 6, "foo.mv.again2"));
 
         // 7. file that exists to file that already exists
-        let move3_again3 = server.handle_rename(fake_rename_args(1, "zee.mv.txt", 0, "baz.txt"));
+        let move3_again3 = server.handle_rename(fake_rename_args(8, "zee.mv.txt", 1, "baz.txt"));
 
         // 8. file that exists to dir that already exists
-        let move3_again4 = server.handle_rename(fake_rename_args(1, "zee.mv.txt", 0, "bazee"));
+        let move3_again4 = server.handle_rename(fake_rename_args(8, "zee.mv.txt", 1, "bazee"));
 
         // 9. dir that exists to dir that already exists
-        let move1_again3 = server.handle_rename(fake_rename_args(5, "foo.mv", 0, "bazee"));
+        let move8_again3 = server.handle_rename(fake_rename_args(5, "foo.mv", 1, "bazee"));
 
         // 10. dir that exists to file that already exists
-        let move1_again4 = server.handle_rename(fake_rename_args(5, "foo.mv", 0, "baz.txt"));
+        let move8_again4 = server.handle_rename(fake_rename_args(5, "foo.mv", 1, "baz.txt"));
 
         // 11. dir into itself
-        let move1_again5 = server.handle_rename(fake_rename_args(5, "foo.mv", 1, "heheheh"));
+        let move8_again5 = server.handle_rename(fake_rename_args(5, "foo.mv", 8, "heheheh"));
 
         // Correctness
 
         // Make sure the old file was deleted and the new one created
-        let find1_old = server.fs_find_by_name(fspath.join("0"), "foo").unwrap();
-        let find1_new = server
-            .fs_find_by_name(fspath.join("0/5"), "foo.mv")
+        let find8_old = server.fs_find_by_name(fspath.join("1"), "foo").unwrap();
+        let find8_new = server
+            .fs_find_by_name(fspath.join("1/5"), "foo.mv")
             .unwrap();
 
-        assert!(find1_old.is_none());
-        assert_eq!(find1_new, Some(1));
+        assert!(find8_old.is_none());
+        assert_eq!(find8_new, Some(8));
 
         let find3_old = server
-            .fs_find_by_name(fspath.join("0/5/1/2"), "zee.txt")
+            .fs_find_by_name(fspath.join("1/5/8/2"), "zee.txt")
             .unwrap();
         let find3_new = server
-            .fs_find_by_name(fspath.join("0/5/1"), "zee.mv.txt")
+            .fs_find_by_name(fspath.join("1/5/8"), "zee.mv.txt")
             .unwrap();
 
         assert!(find3_old.is_none());
@@ -831,7 +833,7 @@ fn test_nfs_rename_easy() {
         }
 
         // 4
-        match move1_again.map_err(|e| e.into()) {
+        match move8_again.map_err(|e| e.into()) {
             Err(ZipError::Nfs(ZipErrorType::NFSERR_NOENT, _)) => {}
             _ => assert!(false),
         }
@@ -843,19 +845,19 @@ fn test_nfs_rename_easy() {
         }
 
         // 6
-        match move1_again2.map_err(|e| e.into()) {
+        match move8_again2.map_err(|e| e.into()) {
             Err(ZipError::Nfs(ZipErrorType::NFSERR_STALE, _)) => {}
             _ => assert!(false),
         }
 
         // 7
-        match move1_again3.map_err(|e| e.into()) {
+        match move8_again3.map_err(|e| e.into()) {
             Err(ZipError::Nfs(ZipErrorType::NFSERR_EXIST, _)) => {}
             _ => assert!(false),
         }
 
         // 8
-        match move1_again4.map_err(|e| e.into()) {
+        match move8_again4.map_err(|e| e.into()) {
             Err(ZipError::Nfs(ZipErrorType::NFSERR_EXIST, _)) => {}
             _ => assert!(false),
         }
@@ -873,7 +875,7 @@ fn test_nfs_rename_easy() {
         }
 
         // 11
-        match move1_again5 {
+        match move8_again5 {
             Err(_) => {}
             _ => assert!(false),
         }
@@ -899,11 +901,11 @@ fn test_nfs_rename_concurrent() {
 
     // Populate the new directory
     create_dir(&fspath).unwrap();
-    File::create(fspath.join("0.root")).unwrap();
-    create_dir(fspath.join("0")).unwrap();
+    File::create(fspath.join("1.root")).unwrap();
+    create_dir(fspath.join("1")).unwrap();
     File::create(fspath.join("counter"))
         .unwrap()
-        .write(&[1, 0, 0, 0, 0, 0, 0, 0])
+        .write(&[2, 0, 0, 0, 0, 0, 0, 0])
         .unwrap();
 
     // If this is 1000, then initial remove_dir_all() or child.join() fail
@@ -920,9 +922,9 @@ fn test_nfs_rename_concurrent() {
             children.push(thread::spawn(move || {
                 let old_name = format!("myobj{}", i);
                 let _ = server
-                    .create_object(fake_create_args(0, &old_name), i % 2 == 0)
+                    .create_object(fake_create_args(1, &old_name), i % 2 == 0)
                     .unwrap();
-                let _ = server.handle_rename(fake_rename_args(0, &old_name, 0, "foo"));
+                let _ = server.handle_rename(fake_rename_args(1, &old_name, 1, "foo"));
             }));
         }
 
@@ -934,12 +936,12 @@ fn test_nfs_rename_concurrent() {
         // Correctness
 
         // At most one file called "foo" got created
-        let find_foo = server.fs_find_by_name(fspath.join("0"), "foo").unwrap();
+        let find_foo = server.fs_find_by_name(fspath.join("1"), "foo").unwrap();
 
         if let Some(fid) = find_foo {
             for i in 1..NTHREADS {
                 if i != fid {
-                    assert!(!fspath.join(format!("0/{}.foo", i)).exists());
+                    assert!(!fspath.join(format!("1/{}.foo", i)).exists());
                 }
             }
         }
@@ -954,7 +956,7 @@ fn test_nfs_statfs() {
     run_with_clone_fs("test_files/test1", true, |fspath| {
         // Make sure we can create a server
         let server = ZippynfsServer::new(fspath);
-        let _statfs = server.handle_statfs(ZipFileHandle::new(0)).unwrap();
+        let _statfs = server.handle_statfs(ZipFileHandle::new(1)).unwrap();
     })
 }
 
@@ -964,7 +966,7 @@ fn test_nfs_write() {
         // Create a server
         let server = ZippynfsServer::new(fspath);
 
-        let fpath_numbered = fspath.join("0/1/2/3");
+        let fpath_numbered = fspath.join("1/8/2/3");
         let mut file = File::open(&fpath_numbered).unwrap();
 
         // Read the contents before so we can compare afterwards
@@ -992,7 +994,7 @@ fn test_nfs_write() {
         // Check the return value
         assert_eq!(write3.count as usize, 13);
         assert_eq!(write3.committed, ZipWriteStable::FILE_SYNC);
-        assert_eq!(write3.verf, 8); // server epoch
+        assert_eq!(write3.verf, 9); // server epoch
 
         // Check that the write happened
         let mut file = File::open(fpath_numbered).unwrap();

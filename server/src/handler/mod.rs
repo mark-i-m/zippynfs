@@ -47,7 +47,7 @@ pub struct ZippynfsServer<'a, P: AsRef<Path>> {
     /// procedure is as follows (to insert a file called "foo" into directory with fid=3):
     ///
     /// 1. Grab the locked set
-    /// 2. Insert /path/to/fs/0/3/foo to set
+    /// 2. Insert /path/to/fs/1/3/foo to set
     /// 3. Release lock on set
     /// 4. Do FS stuff to create the file
     /// 5. Grab the locked set
@@ -106,8 +106,8 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
         }
         let path_bufs = path_bufs;
 
-        // Put numbered files (0/, 1/, 3, etc.) in numbered_files
-        // Put named files (0.root, 1.foo, 3.zee.txt, etc.) in named_files
+        // Put numbered files (1/, 3, etc.) in numbered_files
+        // Put named files (1.root, 3.zee.txt, etc.) in named_files
         Ok(path_bufs.into_iter().partition(|fname| {
             re.is_match(fname.file_name().unwrap().to_str().unwrap())
         }))
@@ -126,7 +126,7 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
     ) -> Result<Option<(PathBuf, Vec<(Fid, Fid)>)>, String> {
         // Initialize state for BFS, starting at root
         let mut queue = VecDeque::new();
-        queue.push_back((&self.data_dir).as_ref().join("0"));
+        queue.push_back((&self.data_dir).as_ref().join("1"));
 
         // Compile regex to check if a filename is a numbered file
         let re = Regex::new(NUMBERED_FILE_RE).unwrap();
@@ -194,8 +194,8 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
         fid: Fid,
     ) -> Result<Option<(PathBuf, Vec<(Fid, Fid)>)>, String> {
         // Always know where the root is
-        if fid == 0 {
-            Ok(Some(((&self.data_dir).as_ref().join("0"), Vec::new())))
+        if fid == 1 {
+            Ok(Some(((&self.data_dir).as_ref().join("1"), Vec::new())))
         } else {
             // Try to reverse-lookup a path all the way back to the root
             if let Some(parent_fid) = self.fid_cache.read().unwrap().get(&fid) {
