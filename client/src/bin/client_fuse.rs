@@ -492,7 +492,8 @@ fn run(server_addr: &str, mnt_path: &str) -> Result<(), String> {
         &mount_path,
         &[],
     ).unwrap();
-    // TODO Handle mount erros
+
+    // TODO Handle mount errors
 
     Ok(())
 }
