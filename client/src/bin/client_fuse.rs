@@ -8,28 +8,30 @@ extern crate time;
 extern crate client;
 extern crate zippyrpc;
 
-use std::process::exit;
-use client::{new_client, ZnfsClient};
-use fuse::{FileAttr, FileType, Filesystem, Request, ReplyAttr, ReplyCreate, ReplyData,
-           ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyStatfs, ReplyWrite};
-use std::path::Path;
-use libc::{ENOENT, ENOSYS, ENOTEMPTY, ENOTDIR, EISDIR, EEXIST, ENAMETOOLONG, EIO, c_int};
-
 use std::time::Duration;
+use std::process::exit;
 use std::thread::sleep;
 use std::ffi::OsStr;
 use std::string::String;
 use std::option::Option;
+use std::vec::Vec;
+use std::path::Path;
+
+use time::{Timespec, get_time};
+use fuse::{FileAttr, FileType, Filesystem, Request, ReplyAttr, ReplyCreate, ReplyData,
+           ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyStatfs, ReplyWrite, ReplyOpen};
+
+use libc::{ENOENT, ENOSYS, ENOTEMPTY, ENOTDIR, EISDIR, EEXIST, ENAMETOOLONG, EIO, c_int};
 
 use zippyrpc::*;
-use time::{Timespec, get_time};
+use client::{new_client, ZnfsClient};
 
 const TTL: Timespec = Timespec { sec: 1, nsec: 0 }; // 1 second
 const MAX_TRIES: usize = 5;
 
 macro_rules! fn_not_impl {
-    ($r:ident) => {
-        println!("Function not implimented");
+    ($r:ident, $name:expr) => {
+        println!("{}:Function not implimented",$name);
         $r.error(ENOSYS);
     }
 }
@@ -147,6 +149,7 @@ fn to_zip_time(s_time: Timespec) -> ZipTimeVal {
 struct ZippyFileSystem {
     znfs: ZnfsClient,
     server_addr: String,
+    server_gen: i64,
 }
 
 impl Filesystem for ZippyFileSystem {
@@ -369,16 +372,7 @@ impl Filesystem for ZippyFileSystem {
         }
     }
 
-    // TODO: Impl the following
-
-    fn mkdir(
-        &mut self,
-        _req: &Request,
-        parent: u64,
-        name: &OsStr,
-        mode: u32,
-        reply: ReplyEntry,
-    ) {
+    fn mkdir(&mut self, _req: &Request, parent: u64, name: &OsStr, mode: u32, reply: ReplyEntry) {
         println!(
             "mkdir(parent={}, _name={:?}, _mode={})",
             parent,
@@ -397,9 +391,11 @@ impl Filesystem for ZippyFileSystem {
             Some(to_zip_time(time_now)),
         );
 
-        let dir_args = ZipDirOpArgs::new(ZipFileHandle::new(parent as i64),
-                                         name.to_os_string().into_string().unwrap());
-        let args = ZipCreateArgs::new(dir_args,attrs);
+        let dir_args = ZipDirOpArgs::new(
+            ZipFileHandle::new(parent as i64),
+            name.to_os_string().into_string().unwrap(),
+        );
+        let args = ZipCreateArgs::new(dir_args, attrs);
 
         match_with_retry! {
             self, reply,
@@ -435,6 +431,14 @@ impl Filesystem for ZippyFileSystem {
          }
     }
 
+    //TODO: Experimental can be removed if it causes wierd behaviour
+    fn open(&mut self, _req: &Request, ino: u64, flags: u32, reply: ReplyOpen) {
+        // since our file handles and inos are same we can safely return the
+        // ino as fh and flags as such
+        println!("open(ino={}, flags={})", ino, flags);
+        reply.opened(ino, flags);
+    }
+
     fn create(
         &mut self,
         _req: &Request,
@@ -444,7 +448,7 @@ impl Filesystem for ZippyFileSystem {
         flags: u32,
         reply: ReplyCreate,
     ) {
-         println!(
+        println!(
             "create(parent={}, _name={:?}, _mode={}, flags={})",
             parent,
             name,
@@ -463,9 +467,11 @@ impl Filesystem for ZippyFileSystem {
             Some(to_zip_time(time_now)),
         );
 
-        let dir_args = ZipDirOpArgs::new(ZipFileHandle::new(parent as i64),
-                                         name.to_os_string().into_string().unwrap());
-        let args = ZipCreateArgs::new(dir_args,attrs);
+        let dir_args = ZipDirOpArgs::new(
+            ZipFileHandle::new(parent as i64),
+            name.to_os_string().into_string().unwrap(),
+        );
+        let args = ZipCreateArgs::new(dir_args, attrs);
 
         match_with_retry! {
             self, reply,
@@ -502,13 +508,52 @@ impl Filesystem for ZippyFileSystem {
          }
     }
 
+    fn write(
+        &mut self,
+        _req: &Request,
+        ino: u64,
+        fh: u64,
+        offset: u64,
+        data: &[u8],
+        _flags: u32,
+        reply: ReplyWrite,
+    ) {
+        println!(
+            "write(ino={}, fh={}, off={}, flags={} )",
+            ino,
+            fh,
+            offset,
+            _flags
+        );
+        let data_vec = Vec::from(data);
+        let args = ZipWriteArgs::new(
+            ZipFileHandle::new(ino as i64),
+            offset as i64,
+            data_vec.len() as i64,
+            data_vec,
+            ZipWriteStable::DATA_SYNC,
+        );
+
+        match_with_retry! {
+            self, reply,
+            self.znfs.write(args.clone()).map_err(|e| e.into()),
+            Ok(result) => {
+                self.server_gen = result.verf;
+                // TODO: Check if it was a commit type or not
+                println!("Write mode = {:?}", result.committed);
+                reply.written(result.count as u32);
+            }
+        }
+    }
+
+ // TODO: Impliment the following
 
     fn unlink(&mut self, _req: &Request, _parent: u64, _name: &OsStr, reply: ReplyEmpty) {
-        fn_not_impl!(reply);
+        fn_not_impl!(reply, "unlink");
     }
 
     fn rmdir(&mut self, _req: &Request, _parent: u64, _name: &OsStr, reply: ReplyEmpty) {
-        fn_not_impl!(reply);
+        fn_not_impl!(reply, "rmdir");
     }
 
     fn rename(
@@ -520,34 +565,21 @@ impl Filesystem for ZippyFileSystem {
         _newname: &OsStr,
         reply: ReplyEmpty,
     ) {
-        fn_not_impl!(reply);
-    }
-
-    fn write(
-        &mut self,
-        _req: &Request,
-        _ino: u64,
-        _fh: u64,
-        _offset: u64,
-        _data: &[u8],
-        _flags: u32,
-        reply: ReplyWrite,
-    ) {
-        fn_not_impl!(reply);
+        fn_not_impl!(reply, "rename");
     }
 
     fn statfs(&mut self, _req: &Request, _ino: u64, reply: ReplyStatfs) {
-        fn_not_impl!(reply);
+        fn_not_impl!(reply, "statfs");
     }
 
     // needed for commit
 
     fn flush(&mut self, _req: &Request, _ino: u64, _fh: u64, _lock_owner: u64, reply: ReplyEmpty) {
-        fn_not_impl!(reply);
+        fn_not_impl!(reply, "flush");
     }
 
     fn fsync(&mut self, _req: &Request, _ino: u64, _fh: u64, _datasync: bool, reply: ReplyEmpty) {
-        fn_not_impl!(reply);
+        fn_not_impl!(reply, "fsync");
     }
 }
 
@@ -594,11 +626,12 @@ fn run(server_addr: &str, mnt_path: &str) -> Result<(), String> {
 
     fuse::mount(
         ZippyFileSystem {
-            znfs,
+            znfs: znfs,
             server_addr: server_addr.to_owned(),
+            server_gen: 0i64,
         },
         &mount_path,
-        &[],
+        &[], // mount options
     ).unwrap();
 
     // TODO Handle mount errors
