@@ -26,6 +26,14 @@ enum NfsCommand {
     RmDir(u64, String), // (did, filename)
     Lookup(u64, String), // (did, filename)
     ReadDir(u64), // did
+    GetAttr(u64), // fid
+    SetAttr(u64, u64, u64, u64), // fid, size, atime, mtime
+    Read(u64, u64, u64), // fid, offset, count
+    Write(u64, u64, u64, bool, String), // fid, offset, count, stable, data
+    Create(u64, String), // did, name
+    Rename(u64, String, u64, String), // from_did, from_name, to_did, to_name
+    StatFs,
+    Commit(u64, u64, u64), // fid, offset, count
 }
 
 impl<'a> TryFrom<&'a str> for NfsCommand {
@@ -89,6 +97,85 @@ impl<'a> TryFrom<&'a str> for NfsCommand {
                     ))
                 }
             }
+            "GETATTR" => {
+                if parts.len() < 2 {
+                    Err("GetAttr without fid".into())
+                } else {
+                    Ok(NfsCommand::GetAttr(
+                        parts[1].parse().map_err(|e| format!("{}", e))?,
+                    ))
+                }
+            }
+            "SETATTR" => {
+                if parts.len() < 5 {
+                    Err("SetAttr without fid, size, atime, mtime".into())
+                } else {
+                    Ok(NfsCommand::SetAttr(
+                        parts[1].parse().map_err(|e| format!("{}", e))?,
+                        parts[2].parse().map_err(|e| format!("{}", e))?,
+                        parts[3].parse().map_err(|e| format!("{}", e))?,
+                        parts[4].parse().map_err(|e| format!("{}", e))?,
+                    ))
+                }
+            }
+            "READ" => {
+                if parts.len() < 4 {
+                    Err("Read without fid, offset, count".into())
+                } else {
+                    Ok(NfsCommand::Read(
+                        parts[1].parse().map_err(|e| format!("{}", e))?,
+                        parts[2].parse().map_err(|e| format!("{}", e))?,
+                        parts[3].parse().map_err(|e| format!("{}", e))?,
+                    ))
+                }
+            }
+            "WRITE" => {
+                if parts.len() < 6 {
+                    Err("Write without fid, offset, count, stable, data".into())
+                } else {
+                    Ok(NfsCommand::Write(
+                        parts[1].parse().map_err(|e| format!("{}", e))?,
+                        parts[2].parse().map_err(|e| format!("{}", e))?,
+                        parts[3].parse().map_err(|e| format!("{}", e))?,
+                        parts[4].parse().map_err(|e| format!("{}", e))?,
+                        parts[5].to_owned(),
+                    ))
+                }
+            }
+            "CREATE" => {
+                if parts.len() < 3 {
+                    Err("Create without did, fname".into())
+                } else {
+                    Ok(NfsCommand::Create(
+                        parts[1].parse().map_err(|e| format!("{}", e))?,
+                        parts[2].to_owned(),
+                    ))
+                }
+            }
+            "RENAME" => {
+                if parts.len() < 5 {
+                    Err("Rename without fromdid, fromfname, todid, tofname".into())
+                } else {
+                    Ok(NfsCommand::Rename(
+                        parts[1].parse().map_err(|e| format!("{}", e))?,
+                        parts[2].to_owned(),
+                        parts[3].parse().map_err(|e| format!("{}", e))?,
+                        parts[4].to_owned(),
+                    ))
+                }
+            }
+            "STATFS" => Ok(NfsCommand::StatFs),
+            "COMMIT" => {
+                if parts.len() < 4 {
+                    Err("Commit without fid, offset, count".into())
+                } else {
+                    Ok(NfsCommand::Commit(
+                        parts[1].parse().map_err(|e| format!("{}", e))?,
+                        parts[2].parse().map_err(|e| format!("{}", e))?,
+                        parts[3].parse().map_err(|e| format!("{}", e))?,
+                    ))
+                }
+            }
             _ => Err(format!("Unknown command: {}", value)),
         }
     }
@@ -118,6 +205,12 @@ fn run(server_addr: &str, command: NfsCommand) -> Result<(), ZipError> {
         NfsCommand::Null => {
             println!("Executing NULL");
             client.null()?;
+            Ok(())
+        }
+
+        NfsCommand::StatFs => {
+            println!("Executing STATFS");
+            client.statfs(ZipFileHandle::new(1))?;
             Ok(())
         }
 
@@ -199,6 +292,151 @@ fn run(server_addr: &str, command: NfsCommand) -> Result<(), ZipError> {
 
             // Send the RPC
             let res = client.readdir(args);
+
+            // Check the result
+            println!("Received response: {:?}", res);
+
+            res.map(|_| ())
+        }
+
+        NfsCommand::GetAttr(fid) => {
+            println!("Executing GetAttr {}", fid);
+
+            // Create the RPC args
+            let args = ZipFileHandle::new(fid as i64);
+
+            // Send the RPC
+            let res = client.getattr(args);
+
+            // Check the result
+            println!("Received response: {:?}", res);
+
+            res.map(|_| ())
+        }
+
+        NfsCommand::SetAttr(fid, size, atime, mtime) => {
+            println!("Executing SetAttr {} {} {} {}", fid, size, atime, mtime);
+
+            // Create the RPC args
+            let args = ZipSattrArgs::new(
+                ZipFileHandle::new(fid as i64),
+                ZipSattr::new(
+                    None,
+                    None,
+                    None,
+                    size as i64,
+                    ZipTimeVal::new(atime as i64, 0),
+                    ZipTimeVal::new(mtime as i64, 0),
+                ),
+            );
+
+            // Send the RPC
+            let res = client.setattr(args);
+
+            // Check the result
+            println!("Received response: {:?}", res);
+
+            res.map(|_| ())
+        }
+
+        NfsCommand::Read(fid, offset, count) => {
+            println!("Executing Read {} {} {}", fid, offset, count);
+
+            // Create the RPC args
+            let args =
+                ZipReadArgs::new(ZipFileHandle::new(fid as i64), offset as i64, count as i64);
+
+            // Send the RPC
+            let res = client.read(args);
+
+            // Check the result
+            println!("Received response: {:?}", res);
+
+            if let Ok(ref resp) = res {
+                let string = String::from_utf8_lossy(&resp.data);
+                println!("Read data:\n======\n{}\n======\n", string);
+            }
+
+            res.map(|_| ())
+        }
+
+        NfsCommand::Write(fid, offset, count, stable, data) => {
+            println!(
+                "Executing Write {} {} {} {} {}",
+                fid,
+                offset,
+                count,
+                stable,
+                data
+            );
+
+            // Create the RPC args
+            let args = ZipWriteArgs::new(
+                ZipFileHandle::new(fid as i64),
+                offset as i64,
+                count as i64,
+                data.into(),
+                if stable {
+                    ZipWriteStable::FILE_SYNC
+                } else {
+                    ZipWriteStable::UNSTABLE
+                },
+            );
+
+            // Send the RPC
+            let res = client.write(args);
+
+            // Check the result
+            println!("Received response: {:?}", res);
+
+            res.map(|_| ())
+        }
+
+        NfsCommand::Create(did, fname) => {
+            println!("Executing Create {} {}", did, fname);
+
+            // Create the RPC args
+            let args = ZipCreateArgs::new(
+                ZipDirOpArgs::new(ZipFileHandle::new(did as i64), fname),
+                ZipSattr::new(None, None, None, None, None, None),
+            );
+
+            // Send the RPC
+            let res = client.create(args);
+
+            // Check the result
+            println!("Received response: {:?}", res);
+
+            res.map(|_| ())
+        }
+
+        NfsCommand::Rename(fdid, ffname, tdid, tfname) => {
+            println!("Executing Rename {} {} {} {}", fdid, ffname, tdid, tfname);
+
+            // Create the RPC args
+            let args = ZipRenameArgs::new(
+                ZipDirOpArgs::new(ZipFileHandle::new(fdid as i64), ffname),
+                ZipDirOpArgs::new(ZipFileHandle::new(tdid as i64), tfname),
+            );
+
+            // Send the RPC
+            let res = client.rename(args);
+
+            // Check the result
+            println!("Received response: {:?}", res);
+
+            res.map(|_| ())
+        }
+
+        NfsCommand::Commit(fid, offset, count) => {
+            println!("Executing Rename {} {} {}", fid, offset, count);
+
+            // Create the RPC args
+            let args =
+                ZipCommitArgs::new(ZipFileHandle::new(fid as i64), offset as i64, count as i64);
+
+            // Send the RPC
+            let res = client.commit(args);
 
             // Check the result
             println!("Received response: {:?}", res);
