@@ -21,7 +21,7 @@ use time::{Timespec, get_time};
 use fuse::{FileAttr, FileType, Filesystem, Request, ReplyAttr, ReplyCreate, ReplyData,
            ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyStatfs, ReplyWrite, ReplyOpen};
 
-use libc::{ENOENT, ENOSYS, ENOTEMPTY, ENOTDIR, EISDIR, EEXIST, ENAMETOOLONG, EIO, c_int};
+use libc::{ENOENT, ENOSYS, ENOTEMPTY, ENOTDIR, EISDIR, EEXIST, ENAMETOOLONG, EIO, EAGAIN, c_int};
 
 use zippyrpc::*;
 use client::{new_client, ZnfsClient};
@@ -84,7 +84,7 @@ macro_rules! errors {
 
             err => {
                 println!("Some other error: {:?}", err);
-                (false, None) // TODO: what to return here?
+                (false, Some(EAGAIN)) // TODO: experimental
             }
         }
     }
@@ -124,9 +124,9 @@ macro_rules! match_with_retry {
         if let Some(libc_err) = libc_err {
             $reply.error(libc_err);
         } else {
-            match result.unwrap() {
-                $ok => $ok_block
-                    _ => { panic!("Should never happen"); }
+            match result {
+                Some($ok) => $ok_block
+                     anything => { panic!("Should never happen {:?}", anything); }
             }
         }
     }
@@ -533,7 +533,6 @@ impl Filesystem for ZippyFileSystem {
             data_vec,
             ZipWriteStable::DATA_SYNC,
         );
-
         match_with_retry! {
             self, reply,
             self.znfs.write(args.clone()).map_err(|e| e.into()),
@@ -546,7 +545,7 @@ impl Filesystem for ZippyFileSystem {
         }
     }
 
- // TODO: Impliment the following
+    // TODO: Impliment the following
 
     fn unlink(&mut self, _req: &Request, _parent: u64, _name: &OsStr, reply: ReplyEmpty) {
         fn_not_impl!(reply, "unlink");
@@ -569,7 +568,26 @@ impl Filesystem for ZippyFileSystem {
     }
 
     fn statfs(&mut self, _req: &Request, _ino: u64, reply: ReplyStatfs) {
-        fn_not_impl!(reply, "statfs");
+        println!("StatFs(ino={})", _ino);
+        let args = ZipFileHandle::new(_ino as i64);
+
+        match_with_retry! {
+            self, reply,
+            self.znfs.statfs(args.clone()).map_err(|e| e.into()),
+            Ok(result) => {
+               reply.statfs(
+                   result.blocks as u64,
+                   result.bfree as u64,
+                   result.bavail as u64,
+                   1 as u64,
+                   1 as u64,
+                   result.bsize as u32,
+                   256u32,
+                   result.tsize as u32,
+                   );
+            }
+        }
+
     }
 
     // needed for commit
