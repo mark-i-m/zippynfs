@@ -10,14 +10,15 @@ extern crate zippyrpc;
 
 use std::process::exit;
 use client::{new_client, ZnfsClient};
-use fuse::{FileAttr, FileType, Filesystem, Request, ReplyAttr, ReplyData, ReplyEntry,
-           ReplyDirectory};
+use fuse::{FileAttr, FileType, Filesystem, Request, ReplyAttr, ReplyBmap, ReplyCreate, ReplyData,
+           ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyLock, ReplyOpen, ReplyStatfs, ReplyWrite,
+           ReplyXattr};
 use std::path::Path;
 use libc::{ENOENT, ENOSYS, ENOTEMPTY, ENOTDIR, EISDIR, EEXIST, ENAMETOOLONG, EIO, c_int};
 
 use std::time::Duration;
 use std::thread::sleep;
-use std::ffi::{OsStr};
+use std::ffi::OsStr;
 use std::string::String;
 use std::option::Option;
 
@@ -28,9 +29,9 @@ const TTL: Timespec = Timespec { sec: 1, nsec: 0 }; // 1 second
 const MAX_TRIES: usize = 5;
 
 macro_rules! fn_not_impl {
-    ($reply:ident) => {
+    ($r:ident) => {
         println!("Function not implimented");
-        $reply.error(ENOSYS);
+        $r.error(ENOSYS);
     }
 }
 macro_rules! errors {
@@ -124,7 +125,7 @@ macro_rules! match_with_retry {
         } else {
             match result.unwrap() {
                 $ok => $ok_block
-                _ => { panic!("Should never happen"); }
+                    _ => { panic!("Should never happen"); }
             }
         }
     }
@@ -297,7 +298,7 @@ impl Filesystem for ZippyFileSystem {
                                 ZipFtype::NFLNK => FileType::Symlink,
                             },
                             entry.fname,
-                        );
+                            );
                         count += 1;
                     }
                 }
@@ -369,18 +370,77 @@ impl Filesystem for ZippyFileSystem {
         }
     }
 
+    // TODO: Impl the following
+
     fn mkdir(
         &mut self,
         _req: &Request,
         _parent: u64,
         _name: &OsStr,
         _mode: u32,
-        reply: ReplyEntry
-        ) {
-    fn_not_impl!{ reply }
+        reply: ReplyEntry,
+    ) {
+        fn_not_impl!(reply);
     }
 
+    fn unlink(&mut self, _req: &Request, _parent: u64, _name: &OsStr, reply: ReplyEmpty) {
+        fn_not_impl!(reply);
+    }
 
+    fn rmdir(&mut self, _req: &Request, _parent: u64, _name: &OsStr, reply: ReplyEmpty) {
+        fn_not_impl!(reply);
+    }
+
+    fn rename(
+        &mut self,
+        _req: &Request,
+        _parent: u64,
+        _name: &OsStr,
+        _newparent: u64,
+        _newname: &OsStr,
+        reply: ReplyEmpty,
+    ) {
+        fn_not_impl!(reply);
+    }
+
+    fn write(
+        &mut self,
+        _req: &Request,
+        _ino: u64,
+        _fh: u64,
+        _offset: u64,
+        _data: &[u8],
+        _flags: u32,
+        reply: ReplyWrite,
+    ) {
+        fn_not_impl!(reply);
+    }
+
+    fn statfs(&mut self, _req: &Request, _ino: u64, reply: ReplyStatfs) {
+        fn_not_impl!(reply);
+    }
+
+    fn create(
+        &mut self,
+        _req: &Request,
+        _parent: u64,
+        _name: &OsStr,
+        _mode: u32,
+        _flags: u32,
+        reply: ReplyCreate,
+    ) {
+        fn_not_impl!(reply);
+    }
+
+    // needed for commit
+
+    fn flush(&mut self, _req: &Request, _ino: u64, _fh: u64, _lock_owner: u64, reply: ReplyEmpty) {
+        fn_not_impl!(reply);
+    }
+
+    fn fsync(&mut self, _req: &Request, _ino: u64, _fh: u64, _datasync: bool, reply: ReplyEmpty) {
+        fn_not_impl!(reply);
+    }
 }
 
 // Checks if the given address is a valid IP Addr
@@ -424,7 +484,14 @@ fn run(server_addr: &str, mnt_path: &str) -> Result<(), String> {
     // setup
     let mount_path = Path::new(mnt_path);
 
-    fuse::mount(ZippyFileSystem { znfs, server_addr: server_addr.to_owned() }, &mount_path, &[]).unwrap();
+    fuse::mount(
+        ZippyFileSystem {
+            znfs,
+            server_addr: server_addr.to_owned(),
+        },
+        &mount_path,
+        &[],
+    ).unwrap();
     // TODO Handle mount erros
 
     Ok(())
