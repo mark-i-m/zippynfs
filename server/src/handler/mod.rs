@@ -267,15 +267,15 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
     ///
     /// NOTE: This method ASSUMES the file actually exists! So you need to check before
     /// calling this method!
-    fn fs_get_attr(&self, fpath: PathBuf, fid: u64) -> ZipFattr {
+    fn fs_get_attr(&self, fpath_numbered: PathBuf, fid: u64) -> ZipFattr {
         // Sanity
         assert_eq!(
-            fpath.file_name().unwrap().to_str().unwrap(),
+            fpath_numbered.file_name().unwrap().to_str().unwrap(),
             format!("{}", fid)
         );
 
         // Get attributes of the file
-        let fmeta = fpath.metadata().unwrap();
+        let fmeta = fpath_numbered.metadata().unwrap();
 
         let size = fmeta.len() as u32;
         let blocks = (size + (BLOCK_SIZE - 1)) / BLOCK_SIZE;
@@ -297,7 +297,7 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
         };
 
         ZipFattr::new(
-            if fpath.is_dir() {
+            if fpath_numbered.is_dir() {
                 ZipFtype::NFDIR
             } else {
                 ZipFtype::NFREG
@@ -338,7 +338,7 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
 
     /// Create the filesystem object in the given directory and increment counter
     ///
-    /// NOTE: This method ASSUMES the file does not exist! So you need to check before
+    /// NOTE: This method ASSUMES the object does not exist! So you need to check before
     /// calling this method!
     fn fs_create_obj(
         &self,
@@ -378,7 +378,6 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
 
         // Find the directory
         let dpath = self.fs_find_by_fid(fsargs.where_.dir.fid as usize)?;
-
         debug!("Found parent at path {:?}", dpath);
 
         // Make sure that directory exists
@@ -531,13 +530,15 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
     fn handle_getattr(&self, fhandle: ZipFileHandle) -> thrift::Result<ZipAttrStat> {
         info!("Handling GETATTR {:?}", fhandle);
 
-        let fpath = self.fs_find_by_fid(fhandle.fid as usize)?;
+        // Find the file/directory
+        let fpath_numbered = self.fs_find_by_fid(fhandle.fid as usize)?;
 
-        match fpath {
-            Some(fpath) => {
-                debug!("Found file at server path {:?}", fpath);
+        // Return a result
+        match fpath_numbered {
+            Some(fpath_numbered) => {
+                debug!("Found file at server path {:?}", fpath_numbered);
                 Ok(ZipAttrStat::new(
-                    self.fs_get_attr(fpath, fhandle.fid as u64),
+                    self.fs_get_attr(fpath_numbered, fhandle.fid as u64),
                 ))
             }
             None => {
@@ -552,11 +553,10 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
     }
 
     fn handle_lookup(&self, fsargs: ZipDirOpArgs) -> thrift::Result<ZipDirOpRes> {
-        info!("Handling Lookup {:?}", fsargs);
+        info!("Handling LOOKUP {:?}", fsargs);
 
         // Find the directory
         let dpath = self.fs_find_by_fid(fsargs.dir.fid as usize)?;
-
         debug!("Found parent at path {:?}", dpath);
 
         // Make sure that directory exists
@@ -580,11 +580,11 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
                 debug!("File \"{}\" with fid = {}", fsargs.filename, fid);
 
                 // Get attributes of the file
-                let fpath = dpath.join(format!("{}", fid));
+                let fpath_numbered = dpath.join(format!("{}", fid));
 
                 Ok(ZipDirOpRes::new(
                     ZipFileHandle::new(fid as i64),
-                    self.fs_get_attr(fpath, fid as u64),
+                    self.fs_get_attr(fpath_numbered, fid as u64),
                 ))
             }
             None => {
@@ -601,51 +601,48 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
         info!("Handling READ {:?}", fsargs);
 
         // Find the file
-        let fpath = self.fs_find_by_fid(fsargs.file.fid as usize)?;
-
-        debug!("Found file at path {:?}", fpath);
+        let fpath_numbered = self.fs_find_by_fid(fsargs.file.fid as usize)?;
+        debug!("Found file at path {:?}", fpath_numbered);
 
         // Make sure that file exists
-        if fpath.is_none() {
+        if fpath_numbered.is_none() {
             return Err(nfs_error(ZipErrorType::NFSERR_STALE));
         }
 
-        let fpath = fpath.unwrap();
+        let fpath_numbered = fpath_numbered.unwrap();
 
-        // Make sure fpath is not a directory
-        if !fpath.is_file() {
+        // Make sure fpath_numbered is not a directory
+        if !fpath_numbered.is_file() {
             return Err(nfs_error(ZipErrorType::NFSERR_ISDIR));
         }
 
         // Get file contents
         let mut data = vec![0; fsargs.count as usize];
         {
-            let f = File::open(&fpath).unwrap();
+            let f = File::open(&fpath_numbered).unwrap();
             // The underlying filesystem makes sure this works, even if another thread
             // concurrently renames or unlinks the file.
             let actual_size = f.read_at(&mut data[..], fsargs.offset as u64).unwrap();
             data.resize(actual_size, 0);
         }
         let data = data;
-
         debug!("Contents: {:?}", data);
 
         // Done
         Ok(ZipReadRes::new(
-            self.fs_get_attr(fpath, fsargs.file.fid as u64),
+            self.fs_get_attr(fpath_numbered, fsargs.file.fid as u64),
             data,
         ))
     }
 
     fn handle_write(&self, fsargs: ZipWriteArgs) -> thrift::Result<ZipWriteRes> {
-        info!("handling Write {:?}", fsargs);
+        info!("Handling WRITE {:?}", fsargs);
 
         // TODO: stable vs async writes
 
         // find the file
         let fpath_numbered = self.fs_find_by_fid(fsargs.file.fid as usize)?;
-
-        debug!("found file at path {:?}", fpath_numbered);
+        debug!("Found file at path {:?}", fpath_numbered);
 
         // Make sure it exists
         if fpath_numbered.is_none() {
@@ -696,19 +693,17 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
     }
 
     fn handle_create(&self, fsargs: ZipCreateArgs) -> thrift::Result<ZipDirOpRes> {
-        info!("Handling CREATE");
-        info!("{:?}", fsargs);
+        info!("Handling CREATE {:?}", fsargs);
 
         self.create_object(fsargs, true)
     }
 
     fn handle_remove(&self, fsargs: ZipDirOpArgs) -> thrift::Result<()> {
-        info!("handling remove {:?}", fsargs);
+        info!("Handling REMOVE {:?}", fsargs);
 
         // find the directory
         let dpath = self.fs_find_by_fid(fsargs.dir.fid as usize)?;
-
-        debug!("found parent at path {:?}", dpath);
+        debug!("Found parent at path {:?}", dpath);
 
         // make sure that directory exists
         if dpath.is_none() {
@@ -751,7 +746,7 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
     }
 
     fn handle_rename(&self, fsargs: ZipRenameArgs) -> thrift::Result<()> {
-        info!("Handling Rename");
+        info!("Handling RENAME {:?}", fsargs);
 
         // Find the old directory
         let old_loc_dpath = self.fs_find_by_fid(fsargs.old_loc.dir.fid as usize)?;
@@ -879,8 +874,7 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
     }
 
     fn handle_mkdir(&self, fsargs: ZipCreateArgs) -> thrift::Result<ZipDirOpRes> {
-        info!("Handling MKDIR");
-        info!("{:?}", fsargs);
+        info!("Handling MKDIR {:?}", fsargs);
 
         self.create_object(fsargs, false)
     }
@@ -890,7 +884,6 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
 
         // Find the directory
         let dpath = self.fs_find_by_fid(fsargs.dir.fid as usize)?;
-
         debug!("Found parent at path {:?}", dpath);
 
         // Make sure that directory exists
@@ -938,7 +931,6 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
 
         // Find the directory
         let dpath = self.fs_find_by_fid(fsargs.dir.fid as usize)?;
-
         debug!("Found parent at path {:?}", dpath);
 
         // Make sure that directory exists
@@ -955,7 +947,6 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
 
         // Get directory contents
         let contents = self.fs_read_dir(dpath)?;
-
         debug!("Contents: {:?}", contents);
 
         Ok(ZipReadDirRes::new(
@@ -969,6 +960,8 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
     }
 
     fn handle_statfs(&self, _: ZipFileHandle) -> thrift::Result<ZipStatFsRes> {
+        info!("Handling STATFS");
+
         // I totally made up these numbers... maybe they are reasonable (but probably not)
         Ok(ZipStatFsRes::new(
             2 << 20,
