@@ -23,7 +23,7 @@ use std::string::String;
 use std::option::Option;
 
 use zippyrpc::*;
-use time::Timespec;
+use time::{Timespec, get_time};
 
 const TTL: Timespec = Timespec { sec: 1, nsec: 0 }; // 1 second
 const MAX_TRIES: usize = 5;
@@ -375,13 +375,79 @@ impl Filesystem for ZippyFileSystem {
     fn mkdir(
         &mut self,
         _req: &Request,
+        parent: u64,
+        name: &OsStr,
+        mode: u32,
+        reply: ReplyEntry,
+    ) {
+        println!(
+            "mkdir(parent={}, _name={:?}, _mode={})",
+            parent,
+            name,
+            mode,
+            );
+
+        let time_now = get_time();
+
+        let attrs = ZipSattr::new(
+            Some(mode).map(|m| m as i16),
+            Some(_req.uid()).map(|m| m as i64),
+            Some(_req.gid()).map(|m| m as i64),
+            None,
+            Some(to_zip_time(time_now)),
+            Some(to_zip_time(time_now)),
+        );
+
+        let dir_args = ZipDirOpArgs::new(ZipFileHandle::new(parent as i64),
+                                         name.to_os_string().into_string().unwrap());
+        let args = ZipCreateArgs::new(dir_args,attrs);
+
+        match_with_retry! {
+            self, reply,
+            self.znfs.mkdir(args.clone()).map_err(|e| e.into()),
+            Ok(dopres) => {
+                let lres = dopres.attributes;
+                let my_time = to_sys_time(lres.ctime);
+                let attr: FileAttr = FileAttr {
+                    ino: lres.fid as u64,
+                    size: lres.size as u64,
+                    blocks: lres.blocks as u64,
+                    atime: to_sys_time(lres.atime),
+                    mtime: to_sys_time(lres.mtime),
+                    ctime: my_time,
+                    crtime: my_time,
+                    kind: match lres.type_ {
+                        ZipFtype::NFREG => FileType::RegularFile,
+                        ZipFtype::NFDIR => FileType::Directory,
+                        ZipFtype::NFNON => FileType::NamedPipe,
+                        ZipFtype::NFBLK => FileType::BlockDevice,
+                        ZipFtype::NFCHR => FileType::CharDevice,
+                        ZipFtype::NFLNK => FileType::Symlink,
+                    },
+                    perm: lres.mode as u16,
+                    nlink: lres.nlink as u32,
+                    uid: lres.uid as u32,
+                    gid: lres.gid as u32,
+                    rdev: lres.rdev as u32,
+                    flags: 0,
+                };
+                reply.entry(&TTL, &attr, 0);
+            }
+         }
+    }
+
+    fn create(
+        &mut self,
+        _req: &Request,
         _parent: u64,
         _name: &OsStr,
         _mode: u32,
-        reply: ReplyEntry,
+        _flags: u32,
+        reply: ReplyCreate,
     ) {
         fn_not_impl!(reply);
     }
+
 
     fn unlink(&mut self, _req: &Request, _parent: u64, _name: &OsStr, reply: ReplyEmpty) {
         fn_not_impl!(reply);
@@ -417,18 +483,6 @@ impl Filesystem for ZippyFileSystem {
     }
 
     fn statfs(&mut self, _req: &Request, _ino: u64, reply: ReplyStatfs) {
-        fn_not_impl!(reply);
-    }
-
-    fn create(
-        &mut self,
-        _req: &Request,
-        _parent: u64,
-        _name: &OsStr,
-        _mode: u32,
-        _flags: u32,
-        reply: ReplyCreate,
-    ) {
         fn_not_impl!(reply);
     }
 
