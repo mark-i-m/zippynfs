@@ -207,7 +207,7 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
                     }
                 }
             } else {
-                debug!("Required disk BFS for FID={}", fid);
+                warn!("Required disk BFS for FID={}", fid);
                 self.fs_find_by_fid_no_cache(fid)
             }
         }
