@@ -9,10 +9,10 @@ mod test;
 use std::fs::{create_dir, read_dir, remove_dir, remove_file, rename, copy, File, OpenOptions};
 use std::io::{Write, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::thread::current;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashSet, HashMap, VecDeque};
 
 use regex::Regex;
 
@@ -60,6 +60,9 @@ pub struct ZippynfsServer<'a, P: AsRef<Path>> {
     ///
     /// In this implementation, we just use the next value of the FID counter, since it is unique.
     epoch: usize,
+
+    /// A cache to map the FID of a file to the FID of its parent.
+    fid_cache: RwLock<HashMap<Fid, Fid>>,
 }
 
 impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
@@ -78,6 +81,7 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
             counter,
             name_lock: Mutex::new(HashSet::new()),
             epoch,
+            fid_cache: RwLock::new(HashMap::new()),
         }
     }
 
@@ -109,13 +113,17 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
         }))
     }
 
-    /// Returns the path to the file with the given `fid`.
+    /// Does most of the heavy lifting of `fs_find_by_fid` without looking in any cache.
     ///
-    /// This is implemented as a BFS over the file system. We expect that it would be
-    /// called very rarely, such as after a crash, once we have implemented caching.
+    /// This is intended as a last resort, and we don't expect it to happen that often,
+    /// except during a failover.
     ///
-    /// TODO: some sort of caching
-    fn fs_find_by_fid(&self, fid: Fid) -> Result<Option<PathBuf>, String> {
+    /// If a path is found, it is returned, along with any mappings that should be inserted
+    /// into the cache.
+    fn fs_find_by_fid_no_cache(
+        &self,
+        fid: Fid,
+    ) -> Result<Option<(PathBuf, Vec<(Fid, Fid)>)>, String> {
         // Initialize state for BFS, starting at root
         let mut queue = VecDeque::new();
         queue.push_back((&self.data_dir).as_ref().join("0"));
@@ -128,7 +136,20 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
             // If the numbered filename equals fid, return
             let cur: Fid = path.file_name().unwrap().to_str().unwrap().parse().unwrap();
             if cur == fid {
-                return Ok(Some(path));
+                // Parse out the path to get a set of (file, parent) pairs which can be cached
+                let heirarchy: Vec<_> = path.strip_prefix(&self.data_dir)
+                    .unwrap()
+                    .iter()
+                    .map(|p| p.to_str().unwrap().parse().unwrap())
+                    .collect();
+
+                let mut pairs = Vec::new();
+
+                for i in 0..(heirarchy.len() - 1) {
+                    pairs.push((heirarchy[i + 1], heirarchy[i]));
+                }
+
+                return Ok(Some((path, pairs)));
             }
 
             // If path is a dir...
@@ -161,6 +182,54 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
 
         // No such fid
         Ok(None)
+    }
+
+    /// Does a series of reverse lookups in the `fid_cache` to trace a path from the FID
+    /// back to the root.
+    ///
+    /// If a path is found, it is returned, along with any mappings that should be inserted
+    /// into the cache.
+    fn fs_find_by_fid_cached(
+        &self,
+        fid: Fid,
+    ) -> Result<Option<(PathBuf, Vec<(Fid, Fid)>)>, String> {
+        // Always know where the root is
+        if fid == 0 {
+            Ok(Some(((&self.data_dir).as_ref().join("0"), Vec::new())))
+        } else {
+            // Try to reverse-lookup a path all the way back to the root
+            if let Some(parent_fid) = self.fid_cache.read().unwrap().get(&fid) {
+                match self.fs_find_by_fid_cached(*parent_fid) {
+                    Err(e) => Err(e),
+                    Ok(None) => Ok(None),
+                    Ok(Some((path, to_cache))) => {
+                        Ok(Some((path.join(format!("{}", fid)), to_cache)))
+                    }
+                }
+            } else {
+                debug!("Required disk BFS for FID={}", fid);
+                self.fs_find_by_fid_no_cache(fid)
+            }
+        }
+    }
+
+    /// Returns the path to the file with the given `fid`.
+    ///
+    /// This is implemented as a BFS over the file system. We expect that it would be
+    /// called very rarely, such as after a crash, once we have implemented caching.
+    fn fs_find_by_fid(&self, fid: Fid) -> Result<Option<PathBuf>, String> {
+        // First, check the cache
+        match self.fs_find_by_fid_cached(fid) {
+            Err(e) => Err(e),
+            Ok(None) => Ok(None),
+            Ok(Some((path, to_cache))) => {
+                // Insert any missing mappings into the cache
+                self.fid_cache.write().unwrap().extend(to_cache);
+
+                // Return the path
+                Ok(Some(path))
+            }
+        }
     }
 
     /// Get the id associated with a file named `fname` in the directory `path` on the NFS server.
@@ -305,6 +374,8 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
     /// A helper for `handle_mkdir` and `handle_create`, which creates either a file
     /// or a directory depending on is_file.
     fn create_object(&self, fsargs: ZipCreateArgs, is_file: bool) -> thrift::Result<ZipDirOpRes> {
+        // TODO insert into cache
+
         // Find the directory
         let dpath = self.fs_find_by_fid(fsargs.where_.dir.fid as usize)?;
 
@@ -392,6 +463,12 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
             remove_dir(fpath_numbered).map_err(|e| format!("{}", e))?;
         }
 
+        // Lock the `fid_cache` while we remove
+        let mut fid_cache_locked = self.fid_cache.write().unwrap();
+
+        // Remove the fid from the cache
+        let _ = fid_cache_locked.remove(&(fid as usize));
+
         // Flush the directory
         let mut dir = File::open(dpath).unwrap();
         dir.flush().map_err(|e| format!("{}", e))?;
@@ -401,6 +478,8 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
 
         // Flush the directory
         dir.flush().map_err(|e| format!("{}", e))?;
+
+        // `fid_cache_locked` dropped
 
         // Done
         Ok(())
@@ -428,7 +507,11 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
                         ZipFtype::NFREG
                     };
 
-                    (numbered_file, (number.parse().unwrap(), name.to_owned(), ftype))
+                    (numbered_file, (
+                        number.parse().unwrap(),
+                        name.to_owned(),
+                        ftype,
+                    ))
                 })
                 .filter(|&(ref numbered_file, _)| {
                     numbered_files.contains(numbered_file)
@@ -754,20 +837,34 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
         }
 
         // Atomic rename numbered file to new location
+        //
+        // While we are doing the rename itself, we need to keep the `fid_cache` locked
         let old_loc_fpath_numbered = old_loc_dpath.join(fid.to_string());
         let new_loc_fpath_numbered = new_loc_dpath.clone().join(fid.to_string());
-        let res = rename(old_loc_fpath_numbered, new_loc_fpath_numbered);
-        if res.is_err() {
-            self.unlock_name(&(new_loc_dpath.clone(), fsargs.new_loc.filename.clone()));
-            return Err(res.err().unwrap().into());
-        }
+        {
+            let mut fid_cache_locked = self.fid_cache.write().unwrap();
 
-        // Flush the directory
-        let res = new_loc_dir.flush();
-        if res.is_err() {
-            self.unlock_name(&(new_loc_dpath.clone(), fsargs.new_loc.filename));
-            return Err(res.err().unwrap().into());
-        }
+            let res = rename(old_loc_fpath_numbered, new_loc_fpath_numbered);
+            if res.is_err() {
+                self.unlock_name(&(new_loc_dpath.clone(), fsargs.new_loc.filename.clone()));
+                return Err(res.err().unwrap().into());
+            }
+
+            // Flush the directory
+            let res = new_loc_dir.flush();
+            if res.is_err() {
+                self.unlock_name(&(new_loc_dpath.clone(), fsargs.new_loc.filename));
+                return Err(res.err().unwrap().into());
+            }
+
+            // Update the cache if the value is in it. Otherwise insert it.
+            let old = fid_cache_locked.insert(fid, fsargs.new_loc.dir.fid as usize);
+
+            // Sanity
+            if let Some(old) = old {
+                assert_eq!(old, fsargs.old_loc.dir.fid as usize);
+            }
+        } // unlock `fid_cache`
 
         // At this point the file has been renamed... we just need to clean up
 
@@ -864,7 +961,9 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
         Ok(ZipReadDirRes::new(
             contents
                 .into_iter()
-                .map(|(fid, fname, ftype)| ZipDirEntry::new(fid as i64, fname, ftype))
+                .map(|(fid, fname, ftype)| {
+                    ZipDirEntry::new(fid as i64, fname, ftype)
+                })
                 .collect(),
         ))
     }

@@ -84,7 +84,7 @@ fn fake_read_args(fid: i64, offset: i64, count: i64) -> ZipReadArgs {
 
 fn fake_create_args(did: i64, filename: &str) -> ZipCreateArgs {
     let where_ = fake_dir_op_args(did, &filename);
-    let attributes = ZipSattr::new(0, 0, 0, ZipTimeVal::new(0, 0), ZipTimeVal::new(0, 0));
+    let attributes = ZipSattr::new(None, None, None, None, None, None);
     ZipCreateArgs::new(where_, attributes)
 }
 
@@ -732,14 +732,19 @@ fn test_nfs_readdir() {
         match readdir0 {
             Ok(ZipReadDirRes { entries }) => {
                 let correct_entries: HashSet<(u64, String, ZipFtype)> =
-                    vec![(1, "foo", ZipFtype::NFDIR), (4, "baz.txt", ZipFtype::NFREG), (5, "bazee", ZipFtype::NFDIR)]
-                        .into_iter()
+                    vec![
+                        (1, "foo", ZipFtype::NFDIR),
+                        (4, "baz.txt", ZipFtype::NFREG),
+                        (5, "bazee", ZipFtype::NFDIR),
+                    ].into_iter()
                         .map(|(fid, fname, ftype)| (fid, fname.to_owned(), ftype))
                         .collect();
 
                 let actual_entries = entries
                     .into_iter()
-                    .map(|ZipDirEntry { fid, fname, type_ }| (fid as u64, fname, type_))
+                    .map(|ZipDirEntry { fid, fname, type_ }| {
+                        (fid as u64, fname, type_)
+                    })
                     .collect();
 
                 // Same set
@@ -751,7 +756,7 @@ fn test_nfs_readdir() {
 }
 
 #[test]
-fn test_nfs_rename() {
+fn test_nfs_rename_easy() {
     run_with_clone_fs("test_files/test1", true, |fspath| {
         // Create a server
         let server = ZippynfsServer::new(fspath);
@@ -902,7 +907,7 @@ fn test_nfs_rename_concurrent() {
         .unwrap();
 
     // If this is 1000, then initial remove_dir_all() or child.join() fail
-    const NTHREADS: usize = 900;
+    const NTHREADS: usize = 500;
 
     // Create a new scope because server drop interfers with test cleanup
     {
