@@ -21,6 +21,9 @@ concurrent operations and crashes.
 - Renames on the underlying filesystem on the server are atomic.
 - The underlying filesystem can accept writes to files even if they move during the write.
 
+### Performance Assumptions/Usage Cases
+
+TODO
 
 ## Design
 
