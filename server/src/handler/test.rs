@@ -74,6 +74,22 @@ where
     }
 }
 
+fn fake_sattr_args(
+    fid: i64,
+    mode: Option<i16>,
+    uid: Option<i64>,
+    gid: Option<i64>,
+    size: Option<i64>,
+    atime: Option<(i64, i64)>,
+    mtime: Option<(i64, i64)>,
+) -> ZipSattrArgs {
+    let file = ZipFileHandle::new(fid);
+    let atime = atime.map(|(seconds, useconds)| ZipTimeVal { seconds, useconds });
+    let mtime = mtime.map(|(seconds, useconds)| ZipTimeVal { seconds, useconds });
+    let attributes = ZipSattr::new(mode, uid, gid, size, atime, mtime);
+    ZipSattrArgs::new(file, attributes)
+}
+
 fn fake_dir_op_args(did: i64, filename: &str) -> ZipDirOpArgs {
     ZipDirOpArgs::new(ZipFileHandle::new(did), filename.to_owned())
 }
@@ -429,7 +445,7 @@ fn test_nfs_getattr() {
             _ => assert!(false),
         }
 
-        // For the two files
+        // For the files
         assert_eq!(attr8.attributes.fid, 8);
         assert_eq!(attr2.attributes.fid, 2);
         assert_eq!(attr3.attributes.fid, 3);
@@ -441,6 +457,39 @@ fn test_nfs_getattr() {
         assert_eq!(attr3.attributes.type_, ZipFtype::NFREG);
         assert_eq!(attr4.attributes.type_, ZipFtype::NFREG);
         assert_eq!(attr5.attributes.type_, ZipFtype::NFDIR);
+    })
+}
+
+#[test]
+fn test_nfs_setattr() {
+    use handler::BLOCK_SIZE;
+
+    run_with_clone_fs("test_files/test1", true, |fspath| {
+        // Create a server
+        let server = ZippynfsServer::new(fspath);
+
+        // SETATTR a bunch of things
+        let attr1 = server.handle_setattr(fake_sattr_args(4, Some(077), Some(0), Some(0), Some(0), Some((10, 20)), Some((30, 40)))).unwrap();
+        let attr2 = server.handle_setattr(fake_sattr_args(1, Some(077), Some(0), Some(0), Some(0), Some((50, 60)), Some((70, 80)))).unwrap();
+
+        // For the files
+        assert_eq!(attr1.attributes.fid, 4);
+        assert_eq!(attr2.attributes.fid, 1);
+
+        assert_eq!(attr1.attributes.type_, ZipFtype::NFREG);
+        assert_eq!(attr1.attributes.size, 0);
+        assert_eq!(attr1.attributes.blocks, 0);
+        assert_eq!(attr1.attributes.atime.seconds, 10);
+        assert_eq!(attr1.attributes.atime.useconds, 20);
+        assert_eq!(attr1.attributes.mtime.seconds, 30);
+        assert_eq!(attr1.attributes.mtime.useconds, 40);
+        assert_eq!(attr2.attributes.type_, ZipFtype::NFDIR);
+        assert_eq!(attr2.attributes.size as u32, BLOCK_SIZE*1);
+        assert_eq!(attr2.attributes.blocks, 1);
+        assert_eq!(attr2.attributes.atime.seconds, 50);
+        assert_eq!(attr2.attributes.atime.useconds, 60);
+        assert_eq!(attr2.attributes.mtime.seconds, 70);
+        assert_eq!(attr2.attributes.mtime.useconds, 80);
     })
 }
 
@@ -728,7 +777,7 @@ fn test_nfs_readdir() {
         let server = ZippynfsServer::new(fspath);
 
         // Call RMDIR
-        let readdir1 = server.handle_readdir(ZipReadDirArgs::new(ZipFileHandle::new(1)));
+        let readdir1 = server.handle_readdir(ZipReadDirArgs::new(ZipFileHandle::new(1), 0));
 
         // Correctness
         match readdir1 {

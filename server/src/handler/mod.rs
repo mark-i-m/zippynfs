@@ -1,4 +1,5 @@
 
+extern crate libc;
 extern crate thrift;
 
 mod counter;
@@ -26,12 +27,13 @@ type Fid = usize;
 
 const BLOCK_SIZE: u32 = 1 << 12; // 4KB
 const NUMBERED_FILE_RE: &'static str = r"^\d+$";
+const NANOS_PER_MICRO: u32 = 1000;
 
 fn sys_time_to_zip_time(sys_time: SystemTime) -> ZipTimeVal {
     let since = sys_time.duration_since(UNIX_EPOCH).unwrap();
 
     let secs = since.as_secs();
-    let nanos = since.subsec_nanos();
+    let nanos = since.subsec_nanos() / NANOS_PER_MICRO;
 
     ZipTimeVal::new(secs as i64, nanos as i64)
 }
@@ -551,7 +553,73 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
     }
 
     fn handle_setattr(&self, fsargs: ZipSattrArgs) -> thrift::Result<ZipAttrStat> {
-        Err("Unimplemented".into())
+        // For classes to help with *const c_char
+        use std::ffi::{CStr, CString};
+
+        // TODO: call set_len to set size attribute
+
+        info!("Handling SETATTR {:?}", fsargs);
+
+        // Find the file/directory. Note that the file may be concurrently renamed or deleted
+        // between here and the call to the libc function.
+        let fpath_numbered = self.fs_find_by_fid(fsargs.file.fid as usize)?;
+
+        // Return a result
+        match fpath_numbered {
+            Some(fpath_numbered) => {
+                debug!("Found file at server path {:?}", fpath_numbered);
+
+                // Construct timevals_ptr
+                let atime = fsargs.attributes.atime.unwrap();
+                let mtime = fsargs.attributes.mtime.unwrap();
+                let access_timeval = libc::timeval {
+                    tv_sec: atime.seconds,
+                    tv_usec: atime.useconds,
+                };
+                let modified_timeval = libc::timeval {
+                    tv_sec: mtime.seconds,
+                    tv_usec: mtime.useconds,
+                };
+                let timevals = [access_timeval, modified_timeval];
+                let timevals_ptr = &timevals as *const libc::timeval;
+
+                // Construct filename_ptr
+                let filename = fpath_numbered.clone().into_os_string().into_string().unwrap();
+                // The CString must be stored in a variable to avoid a dangling pointer
+                let filename_cstr = CString::new(filename).unwrap();
+                let filename_ptr = filename_cstr.as_ptr();
+
+                // Call utimes()
+                let retval = unsafe {
+                    libc::utimes(filename_ptr, timevals_ptr)
+                };
+
+                if retval == -1 {
+                    let errno = unsafe {
+                        *libc::__errno_location()
+                    };
+                    if errno == libc::ENOENT {
+                        // If the file was concurrenty renamed or deleted, return stale
+                        return Err(nfs_error(ZipErrorType::NFSERR_STALE));
+                    } else {
+                        let errmsg_cstr = unsafe {
+                            CStr::from_ptr(libc::strerror(errno))
+                        };
+                        let errmsg = errmsg_cstr.to_str().unwrap();
+                        panic!("Errno = {}, message: {}", errno, errmsg);
+                    }
+                }
+
+                // Done
+                Ok(ZipAttrStat::new(
+                    self.fs_get_attr(fpath_numbered, fsargs.file.fid as u64),
+                ))
+            }
+            None => {
+                debug!("No such file with fid = {}", fsargs.file.fid);
+                Err(nfs_error(ZipErrorType::NFSERR_STALE))
+            }
+        }
     }
 
     fn handle_lookup(&self, fsargs: ZipDirOpArgs) -> thrift::Result<ZipDirOpRes> {
