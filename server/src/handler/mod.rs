@@ -596,9 +596,9 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
 }
 
 impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
-    fn handle_null(&self) -> thrift::Result<()> {
+    fn handle_null(&self) -> thrift::Result<i64> {
         info!("Handling NULL");
-        Ok(())
+        Ok(self.epoch as i64)
     }
 
     fn handle_getattr(&self, fhandle: ZipFileHandle) -> thrift::Result<ZipAttrStat> {

@@ -164,7 +164,7 @@ fn to_zip_time(s_time: Timespec) -> ZipTimeVal {
 struct ZippyFileSystem {
     znfs: ZnfsClient, // Thrift client
     server_addr: String, // Needed to reconnect
-    server_gen: Option<u64>, // Server's generation number
+    server_epoch: u64, // Server's generation number
 }
 
 impl ZippyFileSystem {
@@ -240,7 +240,7 @@ impl ZippyFileSystem {
 
         match result {
             Ok(result) => {
-                self.server_gen = Some(result.verf as u64);
+                self.server_epoch = result.verf as u64;
 
                 // TODO: Check if it was a commit type or not
                 println!("Write mode = {:?}", result.committed);
@@ -255,6 +255,25 @@ impl ZippyFileSystem {
 }
 
 impl Filesystem for ZippyFileSystem {
+    /// Get the server epoch
+    fn init(&mut self, _req: &Request) -> Result<(), c_int> {
+        println!("init()");
+
+        let result =
+            do_with_retry! {
+                self,
+                self.znfs.null().map_err(|e| e.into())
+            };
+
+        match result {
+            Err(err) => Err(err),
+            Ok(epoch) => {
+                self.server_epoch = epoch as u64;
+                Ok(())
+            }
+        }
+    }
+
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         println!("lookup(parent={}, name={:?})", parent, name);
 
@@ -865,7 +884,7 @@ fn run(server_addr: &str, mnt_path: &str) -> Result<(), String> {
         ZippyFileSystem {
             znfs: znfs,
             server_addr: server_addr.to_owned(),
-            server_gen: None,
+            server_epoch: 0, // until we set it in `init`
         },
         &mount_path,
         &[], // mount options

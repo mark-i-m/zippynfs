@@ -153,7 +153,7 @@ struct ZipCommitRes{
 }
 
 service Zippynfs {
-   void null();
+   i64 null(); // Returns the epoch at the server
    ZipAttrStat getattr(1:ZipFileHandle fhandle) throws (1: ZipException ex);
    ZipAttrStat setattr(1:ZipSattrArgs fsargs) throws (1: ZipException ex);
    ZipDirOpRes lookup(1:ZipDirOpArgs fsargs) throws (1: ZipException ex);
