@@ -10,3 +10,6 @@ mod errors;
 
 pub use zippynfs::*;
 pub use errors::*;
+
+/// The maximum size of a message via Thrift... this appears to be a bug in the thrift rust impl.
+pub const MAX_BUF_LEN: usize = 4000;

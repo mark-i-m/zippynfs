@@ -160,38 +160,90 @@ struct ZippyFileSystem {
 }
 
 impl ZippyFileSystem {
-    /*
-    /// Read 0 or more bytes into the given buffer and return how much was read.
+    /// Read 0 or more bytes into the given buffer and returns the size.
+    ///
+    /// We will read 0 bytes if EOF.
     fn read_part(
         &mut self,
         _req: &Request,
         ino: u64,
         _fh: u64,
         offset: u64,
-        _size: u32,
+        size: u32,
         buf: &mut Vec<u8>,
-        reply: &mut ReplyData,
-    ) -> Option<c_int> {
+    ) -> Result<usize, c_int> {
         println!(
             "read(ino={}, _fh={}, off={}, _size={})",
             ino,
             _fh,
             offset,
-            _size
+            size
         );
-        let args = ZipReadArgs::new(ZipFileHandle::new(ino as i64), offset as i64, _size as i64);
 
-        match_with_retry! {
-            self,
-            self.znfs.read(args.clone()).map_err(|e| e.into()),
+        let args = ZipReadArgs::new(ZipFileHandle::new(ino as i64), offset as i64, size as i64);
+
+        let result =
+            do_with_retry! {
+                self,
+                self.znfs.read(args.clone()).map_err(|e| e.into())
+            };
+
+        match result {
             Ok(mut resattr) => {
                 let data_len = resattr.data.len();
+
                 println!("Recv {} B", data_len);
+
+                // Return the data
                 buf.append(&mut resattr.data);
+
+                // Return the number of bytes
+                Ok(data_len)
             }
+            Err(err) => Err(err),
         }
     }
-    */
+
+    /// Write 0 or more bytes from the buffer
+    fn write_part(
+        &mut self,
+        _req: &Request,
+        ino: u64,
+        _fh: u64,
+        offset: u64,
+        data_vec: Vec<u8>,
+        _flags: u32,
+    ) -> Result<(), c_int> {
+        let data_len = min(data_vec.len(), MAX_BUF_LEN);
+
+        let args = ZipWriteArgs::new(
+            ZipFileHandle::new(ino as i64),
+            offset as i64,
+            data_len as i64,
+            data_vec,
+            ZipWriteStable::FILE_SYNC,
+        );
+
+        let result =
+            do_with_retry! {
+                self,
+                self.znfs.write(args.clone()).map_err(|e| e.into())
+            };
+
+        match result {
+            Ok(result) => {
+                self.server_gen = result.verf;
+
+                // TODO: Check if it was a commit type or not
+                println!("Write mode = {:?}", result.committed);
+                assert_eq!(result.count as usize, data_len);
+
+                Ok(())
+            }
+            Err(err) => Err(err),
+        }
+
+    }
 }
 
 impl Filesystem for ZippyFileSystem {
@@ -309,24 +361,6 @@ impl Filesystem for ZippyFileSystem {
             size
         );
 
-        let args = ZipReadArgs::new(ZipFileHandle::new(ino as i64), offset as i64, size as i64);
-
-        let result =
-            do_with_retry! {
-                self,
-                self.znfs.read(args.clone()).map_err(|e| e.into())
-            };
-
-        match result {
-            Err(err) => reply.error(err),
-            Ok(resattr) => {
-                println!("Recv {} B", resattr.data.len());
-                reply.data(&resattr.data);
-            }
-        }
-
-        /* TODO
-
         // Need to return the exact amount of data
         let mut buf = Vec::new();
 
@@ -336,24 +370,30 @@ impl Filesystem for ZippyFileSystem {
         while buf.len() < size {
             let so_far = buf.len();
             let to_go = size - buf.len();
-            if let Some(err) = self.read_part(
+
+            let result = self.read_part(
                 _req,
                 ino,
                 _fh,
                 (offset + so_far) as u64,
                 to_go as u32,
                 &mut buf,
-                &mut reply,
-            )
-            {
+            );
 
-                reply.error(err);
-                return;
+            match result {
+                Err(err) => {
+                    reply.error(err);
+                    return;
+                }
+                Ok(0) => {
+                    // EOF
+                    break;
+                }
+                Ok(_) => {}
             }
         }
 
         reply.data(&buf);
-        */
     }
 
     fn readdir(
@@ -634,31 +674,29 @@ impl Filesystem for ZippyFileSystem {
             _flags
         );
         let data_len = min(data.len(), MAX_BUF_LEN);
-        let data_vec = Vec::from(&data[0..data_len]);
-        let args = ZipWriteArgs::new(
-            ZipFileHandle::new(ino as i64),
-            offset as i64,
-            data_len as i64,
-            data_vec,
-            ZipWriteStable::DATA_SYNC,
-        );
+        let mut data_vec = Vec::from(&data[0..data_len]);
 
-        let result =
-            do_with_retry! {
-                self,
-                self.znfs.write(args.clone()).map_err(|e| e.into())
-            };
+        let mut sent_bytes = 0;
 
-        match result {
-            Err(err) => reply.error(err),
-            Ok(result) => {
-                self.server_gen = result.verf;
-                // TODO: Check if it was a commit type or not
-                println!("Write mode = {:?}", result.committed);
-                assert_eq!(result.count as usize, data_len);
-                reply.written(data_len as u32);
+        while data_vec.len() > 0 {
+            let to_send_len = min(data_vec.len(), MAX_BUF_LEN);
+
+            let mut to_send = data_vec;
+            data_vec = to_send.split_off(to_send_len);
+
+            // We know that this fully writes the data
+            let result = self.write_part(_req, ino, fh, offset + sent_bytes, to_send, _flags);
+
+            if let Err(err) = result {
+                reply.error(err);
+                return;
+            } else {
+                sent_bytes += to_send_len as u64;
             }
         }
+
+        // We know that if we got here, we must have fully sent all bytes without errors
+        reply.written(data_len as u32);
     }
 
     fn unlink(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEmpty) {

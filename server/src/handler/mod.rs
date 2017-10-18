@@ -6,6 +6,7 @@ mod counter;
 #[cfg(test)]
 mod test;
 
+use std::cmp::min;
 use std::fs::{create_dir, read_dir, remove_dir, remove_file, rename, copy, File, OpenOptions};
 use std::io::{Write, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -617,7 +618,7 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
         }
 
         // Get file contents
-        let mut data = vec![0; fsargs.count as usize];
+        let mut data = vec![0; min(fsargs.count as usize, MAX_BUF_LEN)];
         {
             let f = File::open(&fpath_numbered).unwrap();
             // The underlying filesystem makes sure this works, even if another thread
@@ -626,7 +627,8 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
             data.resize(actual_size, 0);
         }
         let data = data;
-        debug!("Contents: {:?}", data);
+        //debug!("Contents: {:?}", data);
+        debug!("Contents Length: {:?}", data.len());
 
         // Done
         Ok(ZipReadRes::new(
