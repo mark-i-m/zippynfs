@@ -27,15 +27,16 @@ use libc::{ENOENT, ENOSYS, ENOTEMPTY, ENOTDIR, EISDIR, EEXIST, ENAMETOOLONG, EIO
 use zippyrpc::*;
 use client::{new_client, ZnfsClient};
 
+/// The Time-To-Live of attributes received from the server
 const TTL: Timespec = Timespec { sec: 1, nsec: 0 }; // 1 second
+
+/// The maximum number of retries (with exponential backoff) before giving up
 const MAX_TRIES: usize = 5;
 
-macro_rules! fn_not_impl {
-    ($r:ident, $name:expr) => {
-        println!("{}:Function not implimented",$name);
-        $r.error(ENOSYS);
-    }
-}
+/// A macro for the repeated error handling that everyone does...
+///
+/// In particular, it attempts to reconnect to the server in case of some failures that should be
+/// handled automatically.
 macro_rules! errors {
     ($e:ident, $s:ident) =>{ {
         match $e {
@@ -85,12 +86,16 @@ macro_rules! errors {
 
             err => {
                 println!("Some other error: {:?}", err);
-                (false, Some(EAGAIN)) // TODO: experimental
+                (false, Some(EAGAIN))
             }
         }
     } }
 }
 
+/// Attempts to run the given expression via RPC and handles retries appropriately.
+///
+/// This macro "returns" a `Result<T, c_int>` where `T` depends on the return type of the RPC. The
+/// `c_int` is a LIBC error if one occurs.
 macro_rules! do_with_retry {
     ($self:ident, $rpc:expr) => { {
         let mut should_try = true;
@@ -139,6 +144,7 @@ macro_rules! do_with_retry {
     } }
 }
 
+/// Convert a `ZipTimeVal` used by NFS/Thrift into a `Timespec` used by FUSE.
 fn to_sys_time(z_time: ZipTimeVal) -> Timespec {
     Timespec {
         sec: z_time.seconds,
@@ -146,6 +152,7 @@ fn to_sys_time(z_time: ZipTimeVal) -> Timespec {
     }
 }
 
+/// Convert a `Timespec` used by FUSE into a `ZipTimeVal` used by NFS/Thrift.
 fn to_zip_time(s_time: Timespec) -> ZipTimeVal {
     ZipTimeVal {
         seconds: s_time.sec,
@@ -153,10 +160,11 @@ fn to_zip_time(s_time: Timespec) -> ZipTimeVal {
     }
 }
 
+/// A stateful FUSE implementation of NFS, which interacts with a remote server via Thrift RPC.
 struct ZippyFileSystem {
-    znfs: ZnfsClient,
-    server_addr: String,
-    server_gen: i64,
+    znfs: ZnfsClient, // Thrift client
+    server_addr: String, // Needed to reconnect
+    server_gen: Option<u64>, // Server's generation number
 }
 
 impl ZippyFileSystem {
@@ -204,7 +212,7 @@ impl ZippyFileSystem {
         }
     }
 
-    /// Write 0 or more bytes from the buffer
+    /// Write 0 or more bytes from the buffer to the given file.
     fn write_part(
         &mut self,
         _req: &Request,
@@ -232,7 +240,7 @@ impl ZippyFileSystem {
 
         match result {
             Ok(result) => {
-                self.server_gen = result.verf;
+                self.server_gen = Some(result.verf as u64);
 
                 // TODO: Check if it was a commit type or not
                 println!("Write mode = {:?}", result.committed);
@@ -247,10 +255,6 @@ impl ZippyFileSystem {
 }
 
 impl Filesystem for ZippyFileSystem {
-    fn init(&mut self, _req: &Request) -> Result<(), c_int> {
-        Ok(()) // For the future?
-    }
-
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         println!("lookup(parent={}, name={:?})", parent, name);
 
@@ -578,7 +582,6 @@ impl Filesystem for ZippyFileSystem {
         }
     }
 
-    //TODO: Experimental can be removed if it causes wierd behaviour
     fn open(&mut self, _req: &Request, ino: u64, flags: u32, reply: ReplyOpen) {
         // since our file handles and inos are same we can safely return the
         // ino as fh and flags as such
@@ -823,19 +826,20 @@ impl Filesystem for ZippyFileSystem {
         }
     }
 
-    // TODO: Impliment the following
-    // needed for commit
-
     fn flush(&mut self, _req: &Request, _ino: u64, _fh: u64, _lock_owner: u64, reply: ReplyEmpty) {
-        fn_not_impl!(reply, "flush");
+        // TODO
+        println!("flush: Function not implimented");
+        reply.error(ENOSYS);
     }
 
     fn fsync(&mut self, _req: &Request, _ino: u64, _fh: u64, _datasync: bool, reply: ReplyEmpty) {
-        fn_not_impl!(reply, "fsync");
+        // TODO
+        println!("fsync: Function not implimented");
+        reply.error(ENOSYS);
     }
 }
 
-// Checks if the given address is a valid IP Addr
+/// Checks if the given String represents a valid network address
 fn is_addr(arg: String) -> Result<(), String> {
     use std::net::ToSocketAddrs;
 
@@ -844,6 +848,33 @@ fn is_addr(arg: String) -> Result<(), String> {
         .map(|_| ())
 }
 
+/// The main routinue of the FUSE client.
+///
+/// It parses args and then attempts to FUSE mount.
+fn run(server_addr: &str, mnt_path: &str) -> Result<(), String> {
+    // build a rpc client
+    let znfs = new_client(server_addr).map_err(|e| format!("{}", e))?;
+
+    // Mount the file system
+    //
+    // using spawn_mount method, an additional thread will be started to handle the mount commands
+    // and current thread of execution will work for handling the rpc setup
+    let mount_path = Path::new(mnt_path);
+
+    fuse::mount(
+        ZippyFileSystem {
+            znfs: znfs,
+            server_addr: server_addr.to_owned(),
+            server_gen: None,
+        },
+        &mount_path,
+        &[], // mount options
+    ).expect("Unable to mount!");
+
+    Ok(())
+}
+
+/// The main method... this just gets command line args and passes them to `run`...
 fn main() {
     let matches = clap_app!{
         zippynfs_client =>
@@ -863,30 +894,4 @@ fn main() {
         println!("Error! {}", e);
         exit(-1);
     }
-
-}
-
-fn run(server_addr: &str, mnt_path: &str) -> Result<(), String> {
-    // build a rpc client
-    let znfs = new_client(server_addr).map_err(|e| format!("{}", e))?;
-
-    // Mount the file system
-    // using spawn_mount method, an additional thread will be started to handle the
-    // mount commands and current thread of execution will work for handling the rpc
-    // setup
-    let mount_path = Path::new(mnt_path);
-
-    fuse::mount(
-        ZippyFileSystem {
-            znfs: znfs,
-            server_addr: server_addr.to_owned(),
-            server_gen: 0i64,
-        },
-        &mount_path,
-        &[], // mount options
-    ).unwrap();
-
-    // TODO Handle mount errors
-
-    Ok(())
 }
