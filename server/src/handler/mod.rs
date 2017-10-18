@@ -669,7 +669,7 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
                 if retval == -1 {
                     let errno = unsafe { *libc::__errno_location() };
                     if errno == libc::ENOENT {
-                        // If the file was concurrenty renamed or deleted, return stale
+                        // If the file was concurrently renamed or deleted, return stale
                         return Err(nfs_error(ZipErrorType::NFSERR_STALE));
                     } else {
                         let errmsg_cstr = unsafe { CStr::from_ptr(libc::strerror(errno)) };

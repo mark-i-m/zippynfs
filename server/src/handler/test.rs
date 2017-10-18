@@ -462,11 +462,13 @@ fn test_nfs_getattr() {
 
 #[test]
 fn test_nfs_setattr() {
-    use handler::BLOCK_SIZE;
+    use std::i32;
 
     run_with_clone_fs("test_files/test1", true, |fspath| {
         // Create a server
         let server = ZippynfsServer::new(fspath);
+        // TODO: this should be i64::MAX, test overflow and negative numbers
+        const MAX: i64 = i32::MAX as i64;
 
         // SETATTR a bunch of things
         let attr1 = server
@@ -491,25 +493,51 @@ fn test_nfs_setattr() {
                 Some((70, 80)),
             ))
             .unwrap();
+        let attr3 = server
+            .handle_setattr(fake_sattr_args(
+                3,
+                Some(077),
+                Some(0),
+                Some(0),
+                Some(0),
+                Some((MAX, 999999)),
+                Some((MAX, 999999)),
+            ))
+            .unwrap();
 
         // For the files
         assert_eq!(attr1.attributes.fid, 4);
         assert_eq!(attr2.attributes.fid, 1);
+        assert_eq!(attr3.attributes.fid, 3);
 
         assert_eq!(attr1.attributes.type_, ZipFtype::NFREG);
         assert_eq!(attr1.attributes.size, 0);
         assert_eq!(attr1.attributes.blocks, 0);
-        assert_eq!(attr1.attributes.atime.seconds, 10);
-        assert_eq!(attr1.attributes.atime.useconds, 20);
-        assert_eq!(attr1.attributes.mtime.seconds, 30);
-        assert_eq!(attr1.attributes.mtime.useconds, 40);
+        let atime1 = attr1.attributes.atime;
+        let mtime1 = attr1.attributes.mtime;
+        // Some filesystems set useconds to 0, and some make atime and mtime the same
+        match (atime1.seconds, atime1.useconds, mtime1.seconds, mtime1.useconds) {
+            (10, 20, 30, 40) | (10, 0, 30, 0) | (10, 20, 10, 20) | (30, 40, 30, 40) | (10, 0, 10, 0) | (30, 0, 30, 0) => {},
+            times => panic!("{:?}", times),
+        }
+
         assert_eq!(attr2.attributes.type_, ZipFtype::NFDIR);
-        assert_eq!(attr2.attributes.size as u32, BLOCK_SIZE * 1);
-        assert_eq!(attr2.attributes.blocks, 1);
-        assert_eq!(attr2.attributes.atime.seconds, 50);
-        assert_eq!(attr2.attributes.atime.useconds, 60);
-        assert_eq!(attr2.attributes.mtime.seconds, 70);
-        assert_eq!(attr2.attributes.mtime.useconds, 80);
+        // Don't check size or blocks for a directory
+        let atime2 = attr2.attributes.atime;
+        let mtime2 = attr2.attributes.mtime;
+        match (atime2.seconds, atime2.useconds, mtime2.seconds, mtime2.useconds) {
+            (50, 60, 70, 80) | (50, 0, 70, 0) | (50, 60, 50, 60) | (70, 80, 70, 80) | (50, 0, 50, 0) | (70, 0, 70, 0) => {},
+            times => panic!("{:?}", times),
+        }
+
+        assert_eq!(attr3.attributes.type_, ZipFtype::NFREG);
+        // Don't check size or blocks for a directory
+        let atime3 = attr3.attributes.atime;
+        let mtime3 = attr3.attributes.mtime;
+        match (atime3.seconds, atime3.useconds, mtime3.seconds, mtime3.useconds) {
+            (MAX, 999999, MAX, 999999) | (MAX, 0, MAX, 0) => {},
+            times => panic!("{:?}", times),
+        }
     })
 }
 
