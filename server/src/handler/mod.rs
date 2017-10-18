@@ -541,6 +541,58 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
                 .collect(),
         )
     }
+
+    fn fs_stable_write(
+        &self,
+        fid: Fid,
+        offset: usize,
+        count: usize,
+        buf: &[u8],
+    ) -> thrift::Result<usize> {
+        // find the file
+        let fpath_numbered = self.fs_find_by_fid(fid)?;
+        debug!("Found file at path {:?}", fpath_numbered);
+
+        // Make sure it exists
+        if fpath_numbered.is_none() {
+            return Err(nfs_error(ZipErrorType::NFSERR_STALE));
+        }
+
+        let fpath_numbered = fpath_numbered.unwrap();
+
+        // Create a tmp file by copying the existing file
+        //
+        // We name the tmp file after the FID and this thread's TID so
+        // as to avoid interleaving writes from different client reqs.
+        let tid = current().id();
+        let tmp_fpath = (&self.data_dir).as_ref().join(
+            format!("tmp/{}_{:?}", fid, tid),
+        );
+        copy(&fpath_numbered, &tmp_fpath)?;
+
+        {
+            // Open the file for the write
+            let mut tmp_file = OpenOptions::new().write(true).open(&tmp_fpath)?;
+
+            // Flush the tmp file to ensure we have its contents
+            tmp_file.sync_all()?;
+
+            // Seek to the write location
+            tmp_file.seek(SeekFrom::Start(offset as u64))?;
+
+            // Write the data to the file
+            assert_eq!(buf.len(), count);
+            tmp_file.write_all(buf)?;
+
+            // Flush the file
+            tmp_file.sync_all()?;
+        } // File closed
+
+        // Atomic rename file
+        rename(tmp_fpath, fpath_numbered)?;
+
+        Ok(buf.len())
+    }
 }
 
 impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
@@ -725,58 +777,33 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
     fn handle_write(&self, fsargs: ZipWriteArgs) -> thrift::Result<ZipWriteRes> {
         info!("Handling WRITE {:?}", fsargs);
 
-        // TODO: stable vs async writes
+        match fsargs.stable {
+            ZipWriteStable::FILE_SYNC |
+            ZipWriteStable::DATA_SYNC => {
+                // Do a stable write
+                let bytes = self.fs_stable_write(
+                    fsargs.file.fid as usize,
+                    fsargs.offset as usize,
+                    fsargs.count as usize,
+                    &fsargs.data,
+                )?;
 
-        // find the file
-        let fpath_numbered = self.fs_find_by_fid(fsargs.file.fid as usize)?;
-        debug!("Found file at path {:?}", fpath_numbered);
+                // Sanity
+                assert_eq!(bytes, fsargs.data.len());
 
-        // Make sure it exists
-        if fpath_numbered.is_none() {
-            return Err(nfs_error(ZipErrorType::NFSERR_STALE));
+                // DONE!
+                Ok(ZipWriteRes::new(
+                    bytes as i64,
+                    ZipWriteStable::FILE_SYNC,
+                    self.epoch as i64,
+                ))
+            }
+
+            ZipWriteStable::UNSTABLE => {
+                // TODO
+                Err("Unimplemented".into())
+            }
         }
-
-        let fpath_numbered = fpath_numbered.unwrap();
-
-        // Create a tmp file by copying the existing file
-        //
-        // We name the tmp file after the FID and this thread's TID so
-        // as to avoid interleaving writes from different client reqs.
-        let tid = current().id();
-        let tmp_fpath = (&self.data_dir).as_ref().join(format!(
-            "tmp/{}_{:?}",
-            fsargs.file.fid,
-            tid
-        ));
-        copy(&fpath_numbered, &tmp_fpath)?;
-
-        {
-            // Open the file for the write
-            let mut tmp_file = OpenOptions::new().write(true).open(&tmp_fpath)?;
-
-            // Flush the tmp file to ensure we have its contents
-            tmp_file.sync_all()?;
-
-            // Seek to the write location
-            tmp_file.seek(SeekFrom::Start(fsargs.offset as u64))?;
-
-            // Write the data to the file
-            assert_eq!(fsargs.data.len(), fsargs.count as usize);
-            tmp_file.write_all(&fsargs.data)?;
-
-            // Flush the file
-            tmp_file.sync_all()?;
-        } // File closed
-
-        // Atomic rename file
-        rename(tmp_fpath, fpath_numbered)?;
-
-        // DONE!
-        Ok(ZipWriteRes::new(
-            fsargs.data.len() as i64,
-            ZipWriteStable::FILE_SYNC, // TODO: for now everything is sync
-            self.epoch as i64,
-        ))
     }
 
     fn handle_create(&self, fsargs: ZipCreateArgs) -> thrift::Result<ZipDirOpRes> {
