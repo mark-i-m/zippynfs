@@ -29,7 +29,6 @@ use client::{new_client, ZnfsClient};
 
 const TTL: Timespec = Timespec { sec: 1, nsec: 0 }; // 1 second
 const MAX_TRIES: usize = 5;
-const MAX_BUF_LEN: usize = 4000;
 
 macro_rules! fn_not_impl {
     ($r:ident, $name:expr) => {
@@ -38,7 +37,7 @@ macro_rules! fn_not_impl {
     }
 }
 macro_rules! errors {
-    ($e:ident, $s:ident) =>{
+    ($e:ident, $s:ident) =>{ {
         match $e {
             ZipError::Nfs(ZipErrorType::NFSERR_STALE, msg) =>{
                 println!("NFS stale file handle: {}", msg);
@@ -89,25 +88,37 @@ macro_rules! errors {
                 (false, Some(EAGAIN)) // TODO: experimental
             }
         }
-    }
+    } }
 }
 
-macro_rules! match_with_retry {
-    ($self:ident, $reply:ident, $rpc:expr, $ok:pat => $ok_block:block) => {
+macro_rules! do_with_retry {
+    ($self:ident, $rpc:expr) => { {
         let mut should_try = true;
         let mut tries = 0;
-        let mut libc_err = None;
-        let mut result: Option<Result<_, ()>> = None;
+        let mut result: Option<Result<_, c_int>> = None;
 
         while should_try && tries < MAX_TRIES {
             // Attempt to make the RPC call
-            let (st, le) = match $rpc {
-                Ok(val) => { result = Some(Ok(val)); (false, None) }
-                Err(e) => errors!(e, $self),
-            };
+            match $rpc {
+                Ok(val) => {
+                    result = Some(Ok(val));
+                    should_try = false;
+                }
+                Err(e) => {
+                    let (st, le) = errors!(e, $self);
 
-            should_try = st;
-            libc_err = le;
+                    // XOR: should retry if there was an err returned,
+                    // but if no error is returned, then we should retry.
+                    assert!(st || le.is_some());
+                    assert!(!st || !le.is_some());
+
+                    should_try = st;
+
+                    if let Some(err) = le {
+                        result = Some(Err(err));
+                    }
+                }
+            }
 
             // Backoff before retrying
             if should_try {
@@ -118,20 +129,14 @@ macro_rules! match_with_retry {
         }
 
         if should_try { // Too many reties
-            libc_err = Some(EIO);
+            result = Some(Err(EIO));
         }
 
-        // If we failed to make the RPC call return an error to FUSE.
-        // Else, call the handling code passed to the macro.
-        if let Some(libc_err) = libc_err {
-            $reply.error(libc_err);
-        } else {
-            match result {
-                Some($ok) => $ok_block
-                     anything => { panic!("Should never happen {:?}", anything); }
-            }
-        }
-    }
+        // At this point `result` should contain _something_
+        assert!(result.is_some());
+
+        result.unwrap()
+    } }
 }
 
 fn to_sys_time(z_time: ZipTimeVal) -> Timespec {
@@ -154,25 +159,64 @@ struct ZippyFileSystem {
     server_gen: i64,
 }
 
-impl Filesystem for ZippyFileSystem {
-    // TODO: Add functions we need for our flie system bindings
+impl ZippyFileSystem {
+    /*
+    /// Read 0 or more bytes into the given buffer and return how much was read.
+    fn read_part(
+        &mut self,
+        _req: &Request,
+        ino: u64,
+        _fh: u64,
+        offset: u64,
+        _size: u32,
+        buf: &mut Vec<u8>,
+        reply: &mut ReplyData,
+    ) -> Option<c_int> {
+        println!(
+            "read(ino={}, _fh={}, off={}, _size={})",
+            ino,
+            _fh,
+            offset,
+            _size
+        );
+        let args = ZipReadArgs::new(ZipFileHandle::new(ino as i64), offset as i64, _size as i64);
 
+        match_with_retry! {
+            self,
+            self.znfs.read(args.clone()).map_err(|e| e.into()),
+            Ok(mut resattr) => {
+                let data_len = resattr.data.len();
+                println!("Recv {} B", data_len);
+                buf.append(&mut resattr.data);
+            }
+        }
+    }
+    */
+}
+
+impl Filesystem for ZippyFileSystem {
     fn init(&mut self, _req: &Request) -> Result<(), c_int> {
         Ok(()) // For the future?
     }
 
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         println!("lookup(parent={}, name={:?})", parent, name);
+
         let args = ZipDirOpArgs::new(
             ZipFileHandle::new(parent as i64),
             name.to_os_string().into_string().unwrap(),
         );
-        // println!("lookup response: {:?}", res);
 
-        match_with_retry! {
-            self, reply,
-            self.znfs.lookup(args.clone()).map_err(|e| e.into()),
+        let result =
+            do_with_retry! {
+                self,
+                self.znfs.lookup(args.clone()).map_err(|e| e.into())
+            };
+
+        match result {
+            Err(err) => reply.error(err),
             Ok(dopres) => {
+                println!("lookup response: {:?}", dopres);
                 let lres = dopres.attributes;
                 let my_time = to_sys_time(lres.ctime);
                 let attr: FileAttr = FileAttr {
@@ -208,10 +252,16 @@ impl Filesystem for ZippyFileSystem {
         let args = ZipFileHandle::new(ino as i64);
         //println!("getattr response: {:?}", res);
 
-        match_with_retry! {
-            self, reply,
-            self.znfs.getattr(args.clone()).map_err(|e| e.into()),
+        let result =
+            do_with_retry! {
+                self,
+                self.znfs.getattr(args.clone()).map_err(|e| e.into())
+            };
+
+        match result {
+            Err(err) => reply.error(err),
             Ok(resattr) => {
+                println!("response: {:?}", resattr);
                 let lres = resattr.attributes;
                 let my_time = to_sys_time(lres.ctime);
                 let attr: FileAttr = FileAttr {
@@ -239,7 +289,7 @@ impl Filesystem for ZippyFileSystem {
                 };
                 reply.attr(&TTL, &attr);
             }
-        }
+        };
     }
 
     fn read(
@@ -248,26 +298,62 @@ impl Filesystem for ZippyFileSystem {
         ino: u64,
         _fh: u64,
         offset: u64,
-        _size: u32,
+        size: u32,
         reply: ReplyData,
     ) {
-
         println!(
             "read(ino={}, _fh={}, off={}, _size={})",
             ino,
             _fh,
             offset,
-            _size
+            size
         );
-        let args = ZipReadArgs::new(ZipFileHandle::new(ino as i64), offset as i64, _size as i64);
 
-        match_with_retry! {
-            self, reply,
-            self.znfs.read(args.clone()).map_err(|e| e.into()),
+        let args = ZipReadArgs::new(ZipFileHandle::new(ino as i64), offset as i64, size as i64);
+
+        let result =
+            do_with_retry! {
+                self,
+                self.znfs.read(args.clone()).map_err(|e| e.into())
+            };
+
+        match result {
+            Err(err) => reply.error(err),
             Ok(resattr) => {
-                reply.data(resattr.data.as_slice());
+                println!("Recv {} B", resattr.data.len());
+                reply.data(&resattr.data);
             }
         }
+
+        /* TODO
+
+        // Need to return the exact amount of data
+        let mut buf = Vec::new();
+
+        let size = size as usize;
+        let offset = offset as usize;
+
+        while buf.len() < size {
+            let so_far = buf.len();
+            let to_go = size - buf.len();
+            if let Some(err) = self.read_part(
+                _req,
+                ino,
+                _fh,
+                (offset + so_far) as u64,
+                to_go as u32,
+                &mut buf,
+                &mut reply,
+            )
+            {
+
+                reply.error(err);
+                return;
+            }
+        }
+
+        reply.data(&buf);
+        */
     }
 
     fn readdir(
@@ -281,9 +367,14 @@ impl Filesystem for ZippyFileSystem {
         println!("readdir(ino={}, _fh={}, off={}", ino, _fh, offset);
         let args = ZipReadDirArgs::new(ZipFileHandle::new(ino as i64));
 
-        match_with_retry! {
-            self, reply,
-            self.znfs.readdir(args.clone()).map_err(|e| e.into()),
+        let result =
+            do_with_retry! {
+                self,
+                self.znfs.readdir(args.clone()).map_err(|e| e.into())
+            };
+
+        match result {
+            Err(err) => reply.error(err),
             Ok(dir_list) => {
                 if offset == 0 {
                     let mut count = 2u64;
@@ -302,13 +393,13 @@ impl Filesystem for ZippyFileSystem {
                                 ZipFtype::NFLNK => FileType::Symlink,
                             },
                             entry.fname,
-                            );
+                        );
                         count += 1;
                     }
                 }
                 reply.ok();
             }
-        }
+        };
     }
 
     fn setattr(
@@ -340,9 +431,14 @@ impl Filesystem for ZippyFileSystem {
         );
         let args = ZipSattrArgs::new(ZipFileHandle::new(_ino as i64), newattrs);
 
-        match_with_retry! {
-            self, reply,
-            self.znfs.setattr(args.clone()).map_err(|e| e.into()),
+        let result =
+            do_with_retry! {
+                self,
+                self.znfs.setattr(args.clone()).map_err(|e| e.into())
+            };
+
+        match result {
+            Err(err) => reply.error(err),
             Ok(resattr) => {
                 let lres = resattr.attributes;
                 let my_time = to_sys_time(lres.ctime);
@@ -399,9 +495,14 @@ impl Filesystem for ZippyFileSystem {
         );
         let args = ZipCreateArgs::new(dir_args, attrs);
 
-        match_with_retry! {
-            self, reply,
-            self.znfs.mkdir(args.clone()).map_err(|e| e.into()),
+        let result =
+            do_with_retry! {
+                self,
+                self.znfs.mkdir(args.clone()).map_err(|e| e.into())
+            };
+
+        match result {
+            Err(err) => reply.error(err),
             Ok(dopres) => {
                 let lres = dopres.attributes;
                 let my_time = to_sys_time(lres.ctime);
@@ -430,7 +531,7 @@ impl Filesystem for ZippyFileSystem {
                 };
                 reply.entry(&TTL, &attr, 0);
             }
-         }
+        }
     }
 
     //TODO: Experimental can be removed if it causes wierd behaviour
@@ -475,9 +576,14 @@ impl Filesystem for ZippyFileSystem {
         );
         let args = ZipCreateArgs::new(dir_args, attrs);
 
-        match_with_retry! {
-            self, reply,
-            self.znfs.create(args.clone()).map_err(|e| e.into()),
+        let result =
+            do_with_retry! {
+                self,
+                self.znfs.create(args.clone()).map_err(|e| e.into())
+            };
+
+        match result {
+            Err(err) => reply.error(err),
             Ok(dopres) => {
                 let lres = dopres.attributes;
                 let my_time = to_sys_time(lres.ctime);
@@ -505,9 +611,9 @@ impl Filesystem for ZippyFileSystem {
                     flags: flags,
                 };
 
-                reply.created(&TTL, &attr,0u64,dopres.file.fid as u64,flags);
+                reply.created(&TTL, &attr, 0u64, dopres.file.fid as u64, flags);
             }
-         }
+        }
     }
 
     fn write(
@@ -536,18 +642,24 @@ impl Filesystem for ZippyFileSystem {
             data_vec,
             ZipWriteStable::DATA_SYNC,
         );
-        match_with_retry! {
-            self, reply,
-            self.znfs.write(args.clone()).map_err(|e| e.into()),
+
+        let result =
+            do_with_retry! {
+                self,
+                self.znfs.write(args.clone()).map_err(|e| e.into())
+            };
+
+        match result {
+            Err(err) => reply.error(err),
             Ok(result) => {
                 self.server_gen = result.verf;
                 // TODO: Check if it was a commit type or not
                 println!("Write mode = {:?}", result.committed);
-                reply.written(result.count as u32);
+                assert_eq!(result.count as usize, data_len);
+                reply.written(data_len as u32);
             }
         }
     }
-
 
     fn unlink(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEmpty) {
         println!(
@@ -560,14 +672,18 @@ impl Filesystem for ZippyFileSystem {
             ZipFileHandle::new(parent as i64),
             name.to_os_string().into_string().unwrap(),
         );
-        match_with_retry! {
-            self, reply,
-            self.znfs.remove(args.clone()).map_err(|e| e.into()),
+        let result =
+            do_with_retry! {
+                self,
+                self.znfs.remove(args.clone()).map_err(|e| e.into())
+            };
+
+        match result {
+            Err(err) => reply.error(err),
             Ok(()) => {
                 reply.ok();
             }
         }
-
     }
 
     fn rmdir(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEmpty) {
@@ -581,9 +697,15 @@ impl Filesystem for ZippyFileSystem {
             ZipFileHandle::new(parent as i64),
             name.to_os_string().into_string().unwrap(),
         );
-        match_with_retry! {
-            self, reply,
-            self.znfs.rmdir(args.clone()).map_err(|e| e.into()),
+
+        let result =
+            do_with_retry! {
+                self,
+                self.znfs.rmdir(args.clone()).map_err(|e| e.into())
+            };
+
+        match result {
+            Err(err) => reply.error(err),
             Ok(()) => {
                 reply.ok();
             }
@@ -615,10 +737,16 @@ impl Filesystem for ZippyFileSystem {
             ZipFileHandle::new(newparent as i64),
             newname.to_os_string().into_string().unwrap(),
         );
+
         let args = ZipRenameArgs::new(old_args, new_args);
-        match_with_retry! {
-            self, reply,
-            self.znfs.rename(args.clone()).map_err(|e| e.into()),
+        let result =
+            do_with_retry! {
+                self,
+                self.znfs.rename(args.clone()).map_err(|e| e.into())
+            };
+
+        match result {
+            Err(err) => reply.error(err),
             Ok(()) => {
                 reply.ok();
             }
@@ -627,27 +755,30 @@ impl Filesystem for ZippyFileSystem {
 
     fn statfs(&mut self, _req: &Request, _ino: u64, reply: ReplyStatfs) {
         println!("StatFs(ino={})", _ino);
-        fn_not_impl!(reply, "statfs");
-    /*        let args = ZipFileHandle::new(_ino as i64);
 
-        match_with_retry! {
-            self, reply,
-            self.znfs.statfs(args.clone()).map_err(|e| e.into()),
+        let args = ZipFileHandle::new(_ino as i64);
+
+        let result =
+            do_with_retry! {
+                self,
+                self.znfs.statfs(args.clone()).map_err(|e| e.into())
+            };
+
+        match result {
+            Err(err) => reply.error(err),
             Ok(result) => {
-               reply.statfs(
-                   result.blocks as u64,
-                   result.bfree as u64,
-                   result.bavail as u64,
-                   1 as u64,
-                   1 as u64,
-                   result.bsize as u32,
-                   256u32,
-                   result.tsize as u32,
-                   );
+                reply.statfs(
+                    result.blocks as u64,
+                    result.bfree as u64,
+                    result.bavail as u64,
+                    1 as u64,
+                    1 as u64,
+                    result.bsize as u32,
+                    256u32,
+                    result.tsize as u32,
+                );
             }
         }
-*/
-
     }
 
     // TODO: Impliment the following
