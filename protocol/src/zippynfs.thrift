@@ -91,6 +91,7 @@ struct ZipReadRes{
 
 struct ZipReadDirArgs{
     1: required ZipFileHandle dir;
+    2: required i64 offset;
 }
 
 struct ZipDirEntry {

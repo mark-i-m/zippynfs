@@ -405,7 +405,8 @@ impl Filesystem for ZippyFileSystem {
         mut reply: ReplyDirectory,
     ) {
         println!("readdir(ino={}, _fh={}, off={}", ino, _fh, offset);
-        let args = ZipReadDirArgs::new(ZipFileHandle::new(ino as i64));
+
+        let args = ZipReadDirArgs::new(ZipFileHandle::new(ino as i64), offset as i64);
 
         let result =
             do_with_retry! {
@@ -416,26 +417,29 @@ impl Filesystem for ZippyFileSystem {
         match result {
             Err(err) => reply.error(err),
             Ok(dir_list) => {
-                if offset == 0 {
-                    let mut count = 2u64;
-                    reply.add(1, 0, FileType::Directory, &Path::new("."));
-                    reply.add(1, 1, FileType::Directory, &Path::new(".."));
-                    for entry in dir_list.entries.into_iter() {
-                        reply.add(
-                            entry.fid as u64,
-                            count,
-                            match entry.type_ {
-                                ZipFtype::NFREG => FileType::RegularFile,
-                                ZipFtype::NFDIR => FileType::Directory,
-                                ZipFtype::NFNON => FileType::NamedPipe,
-                                ZipFtype::NFBLK => FileType::BlockDevice,
-                                ZipFtype::NFCHR => FileType::CharDevice,
-                                ZipFtype::NFLNK => FileType::Symlink,
-                            },
-                            entry.fname,
-                        );
-                        count += 1;
+                println!("resp: {:?}", dir_list);
+                let mut count = 1u64;
+                for entry in dir_list.entries.into_iter() {
+                    println!("entry {}: {:?}", count, entry);
+                    let full = reply.add(
+                        entry.fid as u64,
+                        offset + count,
+                        match entry.type_ {
+                            ZipFtype::NFREG => FileType::RegularFile,
+                            ZipFtype::NFDIR => FileType::Directory,
+                            ZipFtype::NFNON => FileType::NamedPipe,
+                            ZipFtype::NFBLK => FileType::BlockDevice,
+                            ZipFtype::NFCHR => FileType::CharDevice,
+                            ZipFtype::NFLNK => FileType::Symlink,
+                        },
+                        entry.fname,
+                    );
+
+                    if full {
+                        break;
                     }
+
+                    count += 1;
                 }
                 reply.ok();
             }

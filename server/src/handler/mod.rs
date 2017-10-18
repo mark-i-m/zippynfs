@@ -9,6 +9,7 @@ mod test;
 use std::cmp::min;
 use std::fs::{create_dir, read_dir, remove_dir, remove_file, rename, copy, File, OpenOptions};
 use std::io::{Write, Seek, SeekFrom};
+use std::mem;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -949,16 +950,37 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
 
         // Get directory contents
         let contents = self.fs_read_dir(dpath)?;
-        debug!("Contents: {:?}", contents);
 
-        Ok(ZipReadDirRes::new(
-            contents
+        if contents.len() <= (fsargs.offset as usize) {
+            debug!("END OF DIR");
+
+            // No more entries
+            Ok(ZipReadDirRes::new(Vec::new()))
+        } else {
+            // Collect the contents into an ordered collection
+            let mut contents: Vec<_> = contents
                 .into_iter()
                 .map(|(fid, fname, ftype)| {
                     ZipDirEntry::new(fid as i64, fname, ftype)
                 })
-                .collect(),
-        ))
+                .collect();
+
+            // Sort
+            contents.sort_unstable_by(|de1, de2| de1.fid.cmp(&de2.fid));
+
+            // Get just the offset we want.
+            //
+            // Note that we cannot return more than MAX_BUF_LEN bytes
+            let num_de = min(MAX_BUF_LEN / mem::size_of::<ZipDirEntry>(), contents.len());
+
+            let mut contents = contents.split_off(fsargs.offset as usize);
+            contents.truncate(num_de);
+
+            debug!("Returning {} dirents", contents.len());
+            debug!("Contents: {:?}", contents);
+
+            Ok(ZipReadDirRes::new(contents))
+        }
     }
 
     fn handle_statfs(&self, _: ZipFileHandle) -> thrift::Result<ZipStatFsRes> {
