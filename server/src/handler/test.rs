@@ -469,8 +469,28 @@ fn test_nfs_setattr() {
         let server = ZippynfsServer::new(fspath);
 
         // SETATTR a bunch of things
-        let attr1 = server.handle_setattr(fake_sattr_args(4, Some(077), Some(0), Some(0), Some(0), Some((10, 20)), Some((30, 40)))).unwrap();
-        let attr2 = server.handle_setattr(fake_sattr_args(1, Some(077), Some(0), Some(0), Some(0), Some((50, 60)), Some((70, 80)))).unwrap();
+        let attr1 = server
+            .handle_setattr(fake_sattr_args(
+                4,
+                Some(077),
+                Some(0),
+                Some(0),
+                Some(0),
+                Some((10, 20)),
+                Some((30, 40)),
+            ))
+            .unwrap();
+        let attr2 = server
+            .handle_setattr(fake_sattr_args(
+                1,
+                Some(077),
+                Some(0),
+                Some(0),
+                Some(0),
+                Some((50, 60)),
+                Some((70, 80)),
+            ))
+            .unwrap();
 
         // For the files
         assert_eq!(attr1.attributes.fid, 4);
@@ -484,7 +504,7 @@ fn test_nfs_setattr() {
         assert_eq!(attr1.attributes.mtime.seconds, 30);
         assert_eq!(attr1.attributes.mtime.useconds, 40);
         assert_eq!(attr2.attributes.type_, ZipFtype::NFDIR);
-        assert_eq!(attr2.attributes.size as u32, BLOCK_SIZE*1);
+        assert_eq!(attr2.attributes.size as u32, BLOCK_SIZE * 1);
         assert_eq!(attr2.attributes.blocks, 1);
         assert_eq!(attr2.attributes.atime.seconds, 50);
         assert_eq!(attr2.attributes.atime.useconds, 60);

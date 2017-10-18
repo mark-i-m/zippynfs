@@ -67,6 +67,11 @@ pub struct ZippynfsServer<'a, P: AsRef<Path>> {
 
     /// A cache to map the FID of a file to the FID of its parent.
     fid_cache: RwLock<HashMap<Fid, Fid>>,
+
+    /// Buffers for data written by the client asynchronously (with the UNSTABLE flag).
+    ///
+    /// Fid -> [(offset, size, data)]
+    async_bufs: RwLock<HashMap<Fid, Mutex<(usize, usize, Vec<u8>)>>>,
 }
 
 impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
@@ -86,6 +91,7 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
             name_lock: Mutex::new(HashSet::new()),
             epoch,
             fid_cache: RwLock::new(HashMap::new()),
+            async_bufs: RwLock::new(HashMap::new()),
         }
     }
 
@@ -378,8 +384,6 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
     /// A helper for `handle_mkdir` and `handle_create`, which creates either a file
     /// or a directory depending on is_file.
     fn create_object(&self, fsargs: ZipCreateArgs, is_file: bool) -> thrift::Result<ZipDirOpRes> {
-        // TODO insert into cache
-
         // Find the directory
         let dpath = self.fs_find_by_fid(fsargs.where_.dir.fid as usize)?;
         debug!("Found parent at path {:?}", dpath);
@@ -424,13 +428,20 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
 
         // If we get to this point, we know that we own the name!
 
-        // Create a new directory
+        // Create a new object
         let (new_fid, fpath_numbered) = self.fs_create_obj(dpath.clone(), filename, is_file)?;
 
         // TODO: set attributes using fsargs.attributes
 
         // Unlock filename
         self.unlock_name(&(dpath, filename.to_owned()));
+
+        // Insert into cache
+        self.fid_cache.write().unwrap().insert(
+            new_fid,
+            fsargs.where_.dir.fid as
+                usize,
+        );
 
         Ok(ZipDirOpRes::new(
             ZipFileHandle::new(new_fid as i64),
@@ -584,27 +595,25 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
                 let timevals_ptr = &timevals as *const libc::timeval;
 
                 // Construct filename_ptr
-                let filename = fpath_numbered.clone().into_os_string().into_string().unwrap();
+                let filename = fpath_numbered
+                    .clone()
+                    .into_os_string()
+                    .into_string()
+                    .unwrap();
                 // The CString must be stored in a variable to avoid a dangling pointer
                 let filename_cstr = CString::new(filename).unwrap();
                 let filename_ptr = filename_cstr.as_ptr();
 
                 // Call utimes()
-                let retval = unsafe {
-                    libc::utimes(filename_ptr, timevals_ptr)
-                };
+                let retval = unsafe { libc::utimes(filename_ptr, timevals_ptr) };
 
                 if retval == -1 {
-                    let errno = unsafe {
-                        *libc::__errno_location()
-                    };
+                    let errno = unsafe { *libc::__errno_location() };
                     if errno == libc::ENOENT {
                         // If the file was concurrenty renamed or deleted, return stale
                         return Err(nfs_error(ZipErrorType::NFSERR_STALE));
                     } else {
-                        let errmsg_cstr = unsafe {
-                            CStr::from_ptr(libc::strerror(errno))
-                        };
+                        let errmsg_cstr = unsafe { CStr::from_ptr(libc::strerror(errno)) };
                         let errmsg = errmsg_cstr.to_str().unwrap();
                         panic!("Errno = {}, message: {}", errno, errmsg);
                     }
