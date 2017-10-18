@@ -4,13 +4,13 @@ extern crate thrift;
 extern crate zippyrpc;
 
 use thrift::protocol::{TCompactInputProtocol, TCompactOutputProtocol};
-use thrift::transport::{ReadHalf, TFramedReadTransport, TFramedWriteTransport, TIoChannel,
+use thrift::transport::{ReadHalf, TBufferedReadTransport, TBufferedWriteTransport, TIoChannel,
                         TTcpChannel, WriteHalf};
 
 use zippyrpc::ZippynfsSyncClient;
 
-type ClientInputProtocol = TCompactInputProtocol<TFramedReadTransport<ReadHalf<TTcpChannel>>>;
-type ClientOutputProtocol = TCompactOutputProtocol<TFramedWriteTransport<WriteHalf<TTcpChannel>>>;
+type ClientInputProtocol = TCompactInputProtocol<TBufferedReadTransport<ReadHalf<TTcpChannel>>>;
+type ClientOutputProtocol = TCompactOutputProtocol<TBufferedWriteTransport<WriteHalf<TTcpChannel>>>;
 
 pub type ZnfsClient = ZippynfsSyncClient<ClientInputProtocol, ClientOutputProtocol>;
 /// Create a new thrift client communicating with the given server address.
@@ -28,8 +28,8 @@ pub fn new_client(
     let (i_chan, o_chan) = c.split()?;
 
     // wrap the raw sockets (slow) with a buffered transport of some kind
-    let i_tran = TFramedReadTransport::new(i_chan);
-    let o_tran = TFramedWriteTransport::new(o_chan);
+    let i_tran = TBufferedReadTransport::new(i_chan);
+    let o_tran = TBufferedWriteTransport::new(o_chan);
 
     // now create the protocol implementations
     let i_prot = TCompactInputProtocol::new(i_tran);

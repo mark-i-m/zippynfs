@@ -23,7 +23,7 @@ use std::process::exit;
 
 use thrift::protocol::{TCompactInputProtocolFactory, TCompactOutputProtocolFactory};
 use thrift::server::TServer;
-use thrift::transport::{TFramedReadTransportFactory, TFramedWriteTransportFactory};
+use thrift::transport::{TBufferedReadTransportFactory, TBufferedWriteTransportFactory};
 
 use zippyrpc::ZippynfsSyncProcessor;
 
@@ -54,10 +54,10 @@ where
     info!("Hello! The server is starting!");
 
     // Create stuff for Thrift
-    let i_tran_fact = TFramedReadTransportFactory::new();
+    let i_tran_fact = TBufferedReadTransportFactory::new();
     let i_prot_fact = TCompactInputProtocolFactory::new();
 
-    let o_tran_fact = TFramedWriteTransportFactory::new();
+    let o_tran_fact = TBufferedWriteTransportFactory::new();
     let o_prot_fact = TCompactOutputProtocolFactory::new();
 
     // demux incoming messages
