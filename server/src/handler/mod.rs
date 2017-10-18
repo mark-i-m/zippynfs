@@ -23,12 +23,19 @@ use zippyrpc::*;
 
 use self::counter::AtomicPersistentUsize;
 
+/// A type representing a File ID (FID)
 type Fid = usize;
 
+/// The size of FS block
 const BLOCK_SIZE: u32 = 1 << 12; // 4KB
+
+/// A regex for the filename format of the numbered server file for an NFS file
 const NUMBERED_FILE_RE: &'static str = r"^\d+$";
+
+/// The number of ns in a us
 const NANOS_PER_MICRO: u32 = 1000;
 
+/// Converts from `SystemTime` to `ZipTimeVal` used with Trift.
 fn sys_time_to_zip_time(sys_time: SystemTime) -> ZipTimeVal {
     let since = sys_time.duration_since(UNIX_EPOCH).unwrap();
 
