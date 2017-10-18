@@ -16,6 +16,7 @@ use std::string::String;
 use std::option::Option;
 use std::vec::Vec;
 use std::path::Path;
+use std::cmp::min;
 
 use time::{Timespec, get_time};
 use fuse::{FileAttr, FileType, Filesystem, Request, ReplyAttr, ReplyCreate, ReplyData,
@@ -28,6 +29,7 @@ use client::{new_client, ZnfsClient};
 
 const TTL: Timespec = Timespec { sec: 1, nsec: 0 }; // 1 second
 const MAX_TRIES: usize = 5;
+const MAX_BUF_LEN: usize = 4000;
 
 macro_rules! fn_not_impl {
     ($r:ident, $name:expr) => {
@@ -525,11 +527,12 @@ impl Filesystem for ZippyFileSystem {
             offset,
             _flags
         );
-        let data_vec = Vec::from(data);
+        let data_len = min(data.len(), MAX_BUF_LEN);
+        let data_vec = Vec::from(&data[0..data_len]);
         let args = ZipWriteArgs::new(
             ZipFileHandle::new(ino as i64),
             offset as i64,
-            data_vec.len() as i64,
+            data_len as i64,
             data_vec,
             ZipWriteStable::DATA_SYNC,
         );
@@ -624,7 +627,8 @@ impl Filesystem for ZippyFileSystem {
 
     fn statfs(&mut self, _req: &Request, _ino: u64, reply: ReplyStatfs) {
         println!("StatFs(ino={})", _ino);
-        let args = ZipFileHandle::new(_ino as i64);
+        fn_not_impl!(reply, "statfs");
+    /*        let args = ZipFileHandle::new(_ino as i64);
 
         match_with_retry! {
             self, reply,
@@ -642,6 +646,7 @@ impl Filesystem for ZippyFileSystem {
                    );
             }
         }
+*/
 
     }
 
