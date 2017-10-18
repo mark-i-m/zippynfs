@@ -545,26 +545,81 @@ impl Filesystem for ZippyFileSystem {
         }
     }
 
-    // TODO: Impliment the following
 
-    fn unlink(&mut self, _req: &Request, _parent: u64, _name: &OsStr, reply: ReplyEmpty) {
-        fn_not_impl!(reply, "unlink");
+    fn unlink(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEmpty) {
+        println!(
+            "unlinkl( parent={}, name={:?} )",
+            parent,
+            name,
+        );
+
+        let args = ZipDirOpArgs::new(
+            ZipFileHandle::new(parent as i64),
+            name.to_os_string().into_string().unwrap(),
+        );
+        match_with_retry! {
+            self, reply,
+            self.znfs.remove(args.clone()).map_err(|e| e.into()),
+            Ok(()) => {
+                reply.ok();
+            }
+        }
+
     }
 
-    fn rmdir(&mut self, _req: &Request, _parent: u64, _name: &OsStr, reply: ReplyEmpty) {
-        fn_not_impl!(reply, "rmdir");
+    fn rmdir(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEmpty) {
+        println!(
+            "rmdir( parent={}, name={:?} )",
+            parent,
+            name,
+        );
+
+        let args = ZipDirOpArgs::new(
+            ZipFileHandle::new(parent as i64),
+            name.to_os_string().into_string().unwrap(),
+        );
+        match_with_retry! {
+            self, reply,
+            self.znfs.rmdir(args.clone()).map_err(|e| e.into()),
+            Ok(()) => {
+                reply.ok();
+            }
+        }
     }
 
     fn rename(
         &mut self,
         _req: &Request,
-        _parent: u64,
-        _name: &OsStr,
-        _newparent: u64,
-        _newname: &OsStr,
+        parent: u64,
+        name: &OsStr,
+        newparent: u64,
+        newname: &OsStr,
         reply: ReplyEmpty,
     ) {
-        fn_not_impl!(reply, "rename");
+        println!(
+            "rename( parent={}, name={:?}, _new_parent={}, new_name={:?} )",
+             parent,
+            name,
+           newparent,
+            newname,
+        );
+
+        let old_args = ZipDirOpArgs::new(
+            ZipFileHandle::new(parent as i64),
+            name.to_os_string().into_string().unwrap(),
+        );
+        let new_args = ZipDirOpArgs::new(
+            ZipFileHandle::new(newparent as i64),
+            newname.to_os_string().into_string().unwrap(),
+        );
+        let args = ZipRenameArgs::new(old_args, new_args);
+        match_with_retry! {
+            self, reply,
+            self.znfs.rename(args.clone()).map_err(|e| e.into()),
+            Ok(()) => {
+                reply.ok();
+            }
+        }
     }
 
     fn statfs(&mut self, _req: &Request, _ino: u64, reply: ReplyStatfs) {
@@ -590,6 +645,7 @@ impl Filesystem for ZippyFileSystem {
 
     }
 
+    // TODO: Impliment the following
     // needed for commit
 
     fn flush(&mut self, _req: &Request, _ino: u64, _fh: u64, _lock_owner: u64, reply: ReplyEmpty) {
