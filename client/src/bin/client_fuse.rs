@@ -249,7 +249,6 @@ impl ZippyFileSystem {
 
         match result {
             Ok(result) => {
-                println!("Write mode = {:?}", result.committed);
                 assert_eq!(result.count as usize, data_len);
 
                 Ok(result.verf as u64)
