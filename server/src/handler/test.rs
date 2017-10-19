@@ -1076,7 +1076,7 @@ fn test_nfs_statfs() {
 }
 
 #[test]
-fn test_nfs_write_stable() {
+fn test_nfs_write_stable_simple() {
     run_with_clone_fs("test_files/test1", true, |fspath| {
         // Create a server
         let server = ZippynfsServer::new(fspath);
@@ -1119,6 +1119,54 @@ fn test_nfs_write_stable() {
         buf_expected.extend_from_slice(data1);
         buf_expected.extend(&buf_old[data1.len()..]);
         assert_eq!(file.metadata().unwrap().len(), buf_old.len() as u64);
+        assert_eq!(buf_new, buf_expected);
+    })
+}
+
+#[test]
+fn test_nfs_write_stable_extend() {
+    run_with_clone_fs("test_files/test1", true, |fspath| {
+        // Create a server
+        let server = ZippynfsServer::new(fspath);
+
+        let fpath_numbered = fspath.join("1/8/2/3");
+        let mut file = File::open(&fpath_numbered).unwrap();
+
+        // Read the contents before so we can compare afterwards
+        let mut buf_old = Vec::new();
+        let bytes = file.read_to_end(&mut buf_old).unwrap();
+        assert_eq!(bytes, 27);
+
+        // Data to write
+        let data1 = "Hello, World!".as_bytes();
+        assert_eq!(data1.len(), 13);
+
+        // Write a file
+        let write1 = server
+            .handle_write(ZipWriteArgs::new(
+                ZipFileHandle::new(3),
+                26, // offset
+                data1.len() as i64, // count
+                data1.clone().into(),
+                ZipWriteStable::FILE_SYNC,
+            ))
+            .unwrap();
+
+        // Correctness
+
+        // Check the return value
+        assert_eq!(write1.count as usize, data1.len());
+        assert_eq!(write1.committed, ZipWriteStable::FILE_SYNC);
+        assert_eq!(write1.verf, 9); // server epoch
+
+        // Check that the write happened
+        let mut file = File::open(fpath_numbered).unwrap();
+        let mut buf_new = Vec::new();
+        let mut buf_expected = Vec::new();
+        file.read_to_end(&mut buf_new).unwrap();
+        buf_expected.extend(&buf_old[..26]);
+        buf_expected.extend_from_slice(data1);
+        assert_eq!(file.metadata().unwrap().len(), 39);
         assert_eq!(buf_new, buf_expected);
     })
 }
@@ -1189,7 +1237,7 @@ fn test_nfs_write_unstable_simple() {
             .unwrap();
 
         // Correctness
-        assert_eq!(commit1.verf, 9);
+        assert_eq!(commit1.verf, 9); // server epoch
 
         // Check that the write happened
         let mut file = File::open(fpath_numbered).unwrap();
@@ -1200,6 +1248,72 @@ fn test_nfs_write_unstable_simple() {
         buf_expected.extend_from_slice(data2);
         buf_expected.extend(&buf_old[data1.len() + data2.len()..]);
         assert_eq!(file.metadata().unwrap().len(), buf_old.len() as u64);
+        assert_eq!(buf_new, buf_expected);
+    })
+}
+
+#[test]
+fn test_nfs_write_unstable_extend() {
+    run_with_clone_fs("test_files/test1", true, |fspath| {
+        // Create a server
+        let server = ZippynfsServer::new(fspath);
+
+        let fpath_numbered = fspath.join("1/8/2/3");
+        let mut file = File::open(&fpath_numbered).unwrap();
+
+        // Read the contents before so we can compare afterwards
+        let mut buf_old = Vec::new();
+        let bytes = file.read_to_end(&mut buf_old).unwrap();
+        assert_eq!(bytes, 27);
+
+        // Data to write
+        let data1 = "0123".as_bytes();
+        assert_eq!(data1.len(), 4);
+
+        // Write a file multiple times
+        let write1 = server
+            .handle_write(ZipWriteArgs::new(
+                ZipFileHandle::new(3),
+                26, // offset
+                data1.len() as i64, // count
+                data1.clone().into(),
+                ZipWriteStable::UNSTABLE,
+            ))
+            .unwrap();
+
+        // Correctness
+
+        // Check the return value
+        assert_eq!(write1.count as usize, data1.len());
+        assert_eq!(write1.committed, ZipWriteStable::UNSTABLE);
+        assert_eq!(write1.verf, 9); // server epoch
+
+        // Check that the write did not happen
+        let mut file = File::open(&fpath_numbered).unwrap();
+        let mut buf_new = Vec::new();
+        file.read_to_end(&mut buf_new).unwrap();
+        assert_eq!(buf_old, buf_new);
+
+        // Commit file
+        let commit1 = server.
+            handle_commit(ZipCommitArgs::new(
+                ZipFileHandle::new(3),
+                -1, // count
+                -1, // offset
+            ))
+            .unwrap();
+
+        // Correctness
+        assert_eq!(commit1.verf, 9); // server epoch
+
+        // Check that the write happened
+        let mut file = File::open(fpath_numbered).unwrap();
+        let mut buf_new = Vec::new();
+        let mut buf_expected = Vec::new();
+        file.read_to_end(&mut buf_new).unwrap();
+        buf_expected.extend_from_slice(&buf_old[..26]);
+        buf_expected.extend(data1);
+        assert_eq!(file.metadata().unwrap().len(), 30);
         assert_eq!(buf_new, buf_expected);
     })
 }
@@ -1270,7 +1384,7 @@ fn test_nfs_write_unstable_overlap() {
             .unwrap();
 
         // Correctness
-        assert_eq!(commit1.verf, 9);
+        assert_eq!(commit1.verf, 9); // server epoch
 
         // Check that the write happened
         let mut file = File::open(fpath_numbered).unwrap();
@@ -1280,6 +1394,155 @@ fn test_nfs_write_unstable_overlap() {
         buf_expected.extend_from_slice(&data1[..1]);
         buf_expected.extend_from_slice(data2);
         buf_expected.extend(&buf_old[data2.len() + 1..]);
+        assert_eq!(file.metadata().unwrap().len(), buf_old.len() as u64);
+        assert_eq!(buf_new, buf_expected);
+    })
+}
+
+#[test]
+fn test_nfs_write_unstable_crash() {
+    run_with_clone_fs("test_files/test1", true, |fspath| {
+        // Create a server
+        let server = ZippynfsServer::new(fspath);
+
+        let fpath_numbered = fspath.join("1/8/2/3");
+        let mut file = File::open(&fpath_numbered).unwrap();
+
+        // Read the contents before so we can compare afterwards
+        let mut buf_old = Vec::new();
+        let bytes = file.read_to_end(&mut buf_old).unwrap();
+        assert_eq!(bytes, 27);
+
+        // Data to write
+        let data1 = "0123".as_bytes();
+        let data2 = "45678".as_bytes();
+        assert_eq!(data1.len(), 4);
+        assert_eq!(data2.len(), 5);
+
+        // Construct write args
+        let write_args1 = ZipWriteArgs::new(
+            ZipFileHandle::new(3),
+            0, // offset
+            data1.len() as i64, // count
+            data1.clone().into(),
+            ZipWriteStable::UNSTABLE,
+        );
+        let write_args2 = ZipWriteArgs::new(
+            ZipFileHandle::new(3),
+            data1.len() as i64, // offset
+            data2.len() as i64, // count
+            data2.clone().into(),
+            ZipWriteStable::UNSTABLE,
+        );
+
+        // Write a file multiple times
+        let write1 = server.handle_write(write_args1.clone()).unwrap();
+        let write2 = server.handle_write(write_args2.clone()).unwrap();
+
+        // Correctness
+
+        // Check the return value
+        assert_eq!(write1.count as usize, data1.len());
+        assert_eq!(write1.committed, ZipWriteStable::UNSTABLE);
+        assert_eq!(write1.verf, 9); // server epoch
+        assert_eq!(write2.count as usize, data2.len());
+        assert_eq!(write2.committed, ZipWriteStable::UNSTABLE);
+        assert_eq!(write2.verf, 9); // server epoch
+
+        // Check that the write did not happen
+        let mut file = File::open(&fpath_numbered).unwrap();
+        let mut buf_new = Vec::new();
+        file.read_to_end(&mut buf_new).unwrap();
+        assert_eq!(buf_old, buf_new);
+
+        // Crash and reboot
+        let server = ZippynfsServer::new(fspath);
+
+        // Commit file
+        let commit1 = server.
+            handle_commit(ZipCommitArgs::new(
+                ZipFileHandle::new(3),
+                -1, // count
+                -1, // offset
+            ))
+            .unwrap();
+
+        // Correctness
+        assert_eq!(commit1.verf, 10); // server epoch
+
+        // We detected a server crash...start writing from the beginning
+
+        // Write the same file once
+        let write1 = server.handle_write(write_args1.clone()).unwrap();
+
+        // Correctness
+
+        // Check the return value
+        assert_eq!(write1.count as usize, data1.len());
+        assert_eq!(write1.committed, ZipWriteStable::UNSTABLE);
+        assert_eq!(write1.verf, 10); // server epoch
+
+        // Check that the write did not happen
+        let mut file = File::open(&fpath_numbered).unwrap();
+        let mut buf_new = Vec::new();
+        file.read_to_end(&mut buf_new).unwrap();
+        assert_eq!(buf_old, buf_new);
+
+        // Crash and reboot
+        let server = ZippynfsServer::new(fspath);
+
+        // Write the same file
+        let write2 = server.handle_write(write_args2.clone()).unwrap();
+
+        // Correctness
+
+        // Check the return value
+        assert_eq!(write2.count as usize, data2.len());
+        assert_eq!(write2.committed, ZipWriteStable::UNSTABLE);
+        assert_eq!(write2.verf, 11); // server epoch
+
+        // We detected a server crash...start writing from the beginning
+
+        // Write the same file multiple times
+        let write1 = server.handle_write(write_args1.clone()).unwrap();
+        let write2 = server.handle_write(write_args2.clone()).unwrap();
+
+        // Correctness
+
+        // Check the return value
+        assert_eq!(write1.count as usize, data1.len());
+        assert_eq!(write1.committed, ZipWriteStable::UNSTABLE);
+        assert_eq!(write1.verf, 11); // server epoch
+        assert_eq!(write2.count as usize, data2.len());
+        assert_eq!(write2.committed, ZipWriteStable::UNSTABLE);
+        assert_eq!(write2.verf, 11); // server epoch
+
+        // Check that the write did not happen
+        let mut file = File::open(&fpath_numbered).unwrap();
+        let mut buf_new = Vec::new();
+        file.read_to_end(&mut buf_new).unwrap();
+        assert_eq!(buf_old, buf_new);
+
+        // Commit file
+        let commit1 = server.
+            handle_commit(ZipCommitArgs::new(
+                ZipFileHandle::new(3),
+                -1, // count
+                -1, // offset
+            ))
+            .unwrap();
+
+        // Correctness
+        assert_eq!(commit1.verf, 11); // server epoch
+
+        // Check that the write happened
+        let mut file = File::open(fpath_numbered).unwrap();
+        let mut buf_new = Vec::new();
+        let mut buf_expected = Vec::new();
+        file.read_to_end(&mut buf_new).unwrap();
+        buf_expected.extend_from_slice(data1);
+        buf_expected.extend_from_slice(data2);
+        buf_expected.extend(&buf_old[data1.len() + data2.len()..]);
         assert_eq!(file.metadata().unwrap().len(), buf_old.len() as u64);
         assert_eq!(buf_new, buf_expected);
     })
