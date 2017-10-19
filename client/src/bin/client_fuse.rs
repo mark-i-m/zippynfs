@@ -259,9 +259,12 @@ impl ZippyFileSystem {
     }
 
     /// Attempt to write async until we succeed without epoch changes
-    ///
-    /// NOTE: this assumes the fid is actually in the table.
     fn write_async_handle_epochs(&mut self, fid: Fid, mut pos: usize) -> Result<(), c_int> {
+        // If there are no writes, success!
+        if !self.async_bufs.contains_key(&fid) {
+            return Ok(());
+        }
+
         // Get the set of writes
         let writes_len = self.async_bufs.get(&fid).unwrap().len();
 
