@@ -1228,8 +1228,8 @@ fn test_nfs_write_unstable_simple() {
         assert_eq!(buf_old, buf_new);
 
         // Commit file
-        let commit1 = server.
-            handle_commit(ZipCommitArgs::new(
+        let commit1 = server
+            .handle_commit(ZipCommitArgs::new(
                 ZipFileHandle::new(3),
                 -1, // count
                 -1, // offset
@@ -1295,8 +1295,8 @@ fn test_nfs_write_unstable_extend() {
         assert_eq!(buf_old, buf_new);
 
         // Commit file
-        let commit1 = server.
-            handle_commit(ZipCommitArgs::new(
+        let commit1 = server
+            .handle_commit(ZipCommitArgs::new(
                 ZipFileHandle::new(3),
                 -1, // count
                 -1, // offset
@@ -1375,8 +1375,8 @@ fn test_nfs_write_unstable_overlap() {
         assert_eq!(buf_old, buf_new);
 
         // Commit file
-        let commit1 = server.
-            handle_commit(ZipCommitArgs::new(
+        let commit1 = server
+            .handle_commit(ZipCommitArgs::new(
                 ZipFileHandle::new(3),
                 -1, // count
                 -1, // offset
@@ -1459,8 +1459,8 @@ fn test_nfs_write_unstable_crash() {
         let server = ZippynfsServer::new(fspath);
 
         // Commit file
-        let commit1 = server.
-            handle_commit(ZipCommitArgs::new(
+        let commit1 = server
+            .handle_commit(ZipCommitArgs::new(
                 ZipFileHandle::new(3),
                 -1, // count
                 -1, // offset
@@ -1524,8 +1524,8 @@ fn test_nfs_write_unstable_crash() {
         assert_eq!(buf_old, buf_new);
 
         // Commit file
-        let commit1 = server.
-            handle_commit(ZipCommitArgs::new(
+        let commit1 = server
+            .handle_commit(ZipCommitArgs::new(
                 ZipFileHandle::new(3),
                 -1, // count
                 -1, // offset

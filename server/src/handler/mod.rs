@@ -851,7 +851,13 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
     }
 
     fn handle_write(&self, fsargs: ZipWriteArgs) -> thrift::Result<ZipWriteRes> {
-        info!("Handling WRITE {:?}", fsargs);
+        info!(
+            "Handling WRITE fid={}, offset={}, count={}, stable={:?}",
+            fsargs.file.fid,
+            fsargs.offset,
+            fsargs.count,
+            fsargs.stable
+        );
 
         match fsargs.stable {
             ZipWriteStable::FILE_SYNC |
