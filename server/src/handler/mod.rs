@@ -881,6 +881,7 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
                     fsargs.data,
                 ));
 
+                // Immediately ACK
                 Ok(ZipWriteRes::new(
                     size as i64,
                     ZipWriteStable::UNSTABLE,
@@ -1193,6 +1194,82 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
     }
 
     fn handle_commit(&self, fsargs: ZipCommitArgs) -> thrift::Result<ZipCommitRes> {
-        Err("Unimplemented".into())
+        info!("Handling COMMMIT {:?}", fsargs);
+
+        // find the file
+        let fpath_numbered = self.fs_find_by_fid(fsargs.file.fid as Fid)?;
+        debug!("Found file at path {:?}", fpath_numbered);
+
+        // Make sure it exists
+        if fpath_numbered.is_none() {
+            return Err(nfs_error(ZipErrorType::NFSERR_STALE));
+        }
+
+        let fpath_numbered = fpath_numbered.unwrap();
+
+        // Grab that set of changes out of the table
+        let to_write = self.async_bufs.write().unwrap().remove(
+            &(fsargs.file.fid as Fid),
+        );
+
+        // If there are no changes to be committed, then return success immediately
+        if to_write.is_none() {
+            return Ok(ZipCommitRes::new(self.epoch as i64));
+        }
+
+        // Extract from the mutex since we alone have this entry
+        //
+        // NOTE: we still need to lock and empty this Vec because somebody else could be holding a
+        // copy of the Arc and waiting for the lock. We need to make sure that they don't try to do
+        // the same work we just did.
+        let unlocked = to_write.unwrap();
+        let mut to_write = unlocked.lock().unwrap();
+
+        // If there are no changes to be committed, then return success immediately
+        if to_write.is_empty() {
+            return Ok(ZipCommitRes::new(self.epoch as i64));
+        }
+
+        // Ok, so at this point we know that there is work to do, so let's do it!
+
+        // Create a tmp file by copying the existing file
+        //
+        // We name the tmp file after the FID and this thread's TID so
+        // as to avoid interleaving writes from different client reqs.
+        let tid = current().id();
+        let tmp_fpath = (&self.data_dir).as_ref().join(format!(
+            "tmp/{}_{:?}",
+            fsargs.file.fid,
+            tid
+        ));
+        copy(&fpath_numbered, &tmp_fpath)?;
+
+        {
+            // Open the file for the write
+            let mut tmp_file = OpenOptions::new().write(true).open(&tmp_fpath)?;
+
+            // Flush the tmp file to ensure we have its contents
+            tmp_file.sync_all()?;
+
+            // Do each write onto the tmp file and flush them together
+            //
+            // NOTE: this also empties the Vec, so that future lockers will see no work to do!
+            for (offset, count, buf) in to_write.drain(..) {
+                // Seek to the write location
+                tmp_file.seek(SeekFrom::Start(offset as u64))?;
+
+                // Write the data to the file
+                assert_eq!(buf.len(), count);
+                tmp_file.write_all(&buf)?;
+            }
+
+            // Flush the file
+            tmp_file.sync_all()?;
+        } // File closed
+
+        // Atomic rename file
+        rename(tmp_fpath, fpath_numbered)?;
+
+        Ok(ZipCommitRes::new(self.epoch as i64))
     }
 }
