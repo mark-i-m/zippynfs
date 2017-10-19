@@ -319,7 +319,7 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
             } else {
                 ZipFtype::NFREG
             },
-            0777, // mode
+            0x1FF, // mode
             1, // number of links
             0, // uid
             0, // gid
@@ -866,6 +866,7 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
             fsargs.count,
             fsargs.stable
         );
+        debug!("{}", String::from_utf8_lossy(&fsargs.data));
 
         match fsargs.stable {
             ZipWriteStable::FILE_SYNC |
