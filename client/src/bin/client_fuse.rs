@@ -35,7 +35,7 @@ const TTL: Timespec = Timespec { sec: 1, nsec: 0 }; // 1 second
 const MAX_TRIES: usize = 5;
 
 /// Set to true to turn on asynchronous writes
-const ASYNC_WRITES: bool = false;
+const ASYNC_WRITES: bool = true;
 
 /// A type representing a File ID (FID)
 type Fid = usize;
@@ -290,6 +290,11 @@ impl ZippyFileSystem {
 
             // If the epoch changed, then we need to start over
             if epoch != self.server_epoch {
+                println!(
+                    "EPOCH Mismatch: Expected {} Got {}",
+                    self.server_epoch,
+                    epoch
+                );
                 self.server_epoch = epoch;
                 pos = 0;
             } else {
@@ -356,6 +361,12 @@ impl ZippyFileSystem {
                 self.async_bufs.remove(&fid);
                 break;
             } else {
+                println!(
+                    "EPOCH Mismatch: Expected {} Got {}",
+                    self.server_epoch,
+                    epoch
+                );
+                self.server_epoch = epoch;
                 self.write_async_handle_epochs(fid, 0)?;
             }
         }

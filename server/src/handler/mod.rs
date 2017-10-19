@@ -685,11 +685,19 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
     /// Get or create the `async_bufs` entry for the given FID.
     fn get_or_create_async_bufs(&self, fid: Fid) -> Arc<Mutex<Vec<(usize, usize, Vec<u8>)>>> {
         // Check if the entry exists in the table already
-        if let Some(entry) = self.async_bufs.read().unwrap().get(&fid) {
+        let try_read = {
+            self.async_bufs.read().unwrap().get(&fid).map(|e| e.clone())
+        }; // LOCK DROPPED (otherwise, the write lock acquire might deadlock)
+
+        if let Some(entry) = try_read {
+            debug!("Read FID entry");
             entry.clone()
         } else {
+            debug!("Created FID entry");
             // Writer lock, then insert new entry
             let mut write_locked = self.async_bufs.write().unwrap();
+
+            debug!("Write lock on async table");
             write_locked.insert(fid, Arc::new(Mutex::new(Vec::new())));
 
             // Get the entry and return
@@ -875,6 +883,8 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
 
                 // Get or create the appropriate buffer set and append the given data to the buffer
                 let unlocked = self.get_or_create_async_bufs(fsargs.file.fid as Fid);
+
+                debug!("Got unlocked FID entry");
                 unlocked.lock().unwrap().push((
                     fsargs.offset as usize,
                     size,
