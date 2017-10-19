@@ -23,7 +23,7 @@ use time::{Timespec, get_time};
 use fuse::{FileAttr, FileType, Filesystem, Request, ReplyAttr, ReplyCreate, ReplyData,
            ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyStatfs, ReplyWrite, ReplyOpen};
 
-use libc::{ENOENT, ENOSYS, ENOTEMPTY, ENOTDIR, EISDIR, EEXIST, ENAMETOOLONG, EIO, EAGAIN, c_int};
+use libc::{ENOENT, ENOTEMPTY, ENOTDIR, EISDIR, EEXIST, ENAMETOOLONG, EIO, EAGAIN, c_int};
 
 use zippyrpc::*;
 use client::{new_client, ZnfsClient};
@@ -33,6 +33,9 @@ const TTL: Timespec = Timespec { sec: 1, nsec: 0 }; // 1 second
 
 /// The maximum number of retries (with exponential backoff) before giving up
 const MAX_TRIES: usize = 5;
+
+/// Set to true to turn on asynchronous writes
+const ASYNC_WRITES: bool = false;
 
 /// A type representing a File ID (FID)
 type Fid = usize;
@@ -308,7 +311,7 @@ impl ZippyFileSystem {
         offset: u64,
         size: u64,
         data: Vec<u8>,
-    ) -> Result<(), c_int> {
+    ) -> Result<u64, c_int> {
         // Append to the appropriate set of async bufs
         let pos = if self.async_bufs.contains_key(&fid) {
             let async_bufs = self.async_bufs.get_mut(&fid).unwrap();
@@ -321,7 +324,7 @@ impl ZippyFileSystem {
         };
 
         // Then attempt to write frome the given position
-        self.write_async_handle_epochs(fid, pos)
+        self.write_async_handle_epochs(fid, pos).map(|_| size)
     }
 
     /// A helper for running a COMMIT
@@ -819,8 +822,11 @@ impl Filesystem for ZippyFileSystem {
             data_vec = to_send.split_off(to_send_len);
 
             // We know that this fully writes the data.
-            let result =
-                self.write_part(ino, offset + sent_bytes, to_send, ZipWriteStable::FILE_SYNC);
+            let result = if ASYNC_WRITES {
+                self.write_async_part(ino as Fid, offset + sent_bytes, to_send_len as u64, to_send)
+            } else {
+                self.write_part(ino, offset + sent_bytes, to_send, ZipWriteStable::FILE_SYNC)
+            };
 
             if let Err(err) = result {
                 reply.error(err);
@@ -954,16 +960,20 @@ impl Filesystem for ZippyFileSystem {
         }
     }
 
-    fn flush(&mut self, _req: &Request, _ino: u64, _fh: u64, _lock_owner: u64, reply: ReplyEmpty) {
-        // TODO
-        println!("flush: Function not implimented");
-        reply.error(ENOSYS);
+    fn flush(&mut self, _req: &Request, ino: u64, _fh: u64, _lock_owner: u64, reply: ReplyEmpty) {
+        println!("flush(ino={})", ino);
+        match self.commit(ino as Fid) {
+            Ok(()) => reply.ok(),
+            Err(err) => reply.error(err),
+        }
     }
 
-    fn fsync(&mut self, _req: &Request, _ino: u64, _fh: u64, _datasync: bool, reply: ReplyEmpty) {
-        // TODO
-        println!("fsync: Function not implimented");
-        reply.error(ENOSYS);
+    fn fsync(&mut self, _req: &Request, ino: u64, _fh: u64, _datasync: bool, reply: ReplyEmpty) {
+        println!("fsync(ino={})", ino);
+        match self.commit(ino as Fid) {
+            Ok(()) => reply.ok(),
+            Err(err) => reply.error(err),
+        }
     }
 }
 
