@@ -516,8 +516,14 @@ fn test_nfs_setattr() {
         let atime1 = attr1.attributes.atime;
         let mtime1 = attr1.attributes.mtime;
         // Some filesystems set useconds to 0, and some make atime and mtime the same
-        match (atime1.seconds, atime1.useconds, mtime1.seconds, mtime1.useconds) {
-            (10, 20, 30, 40) | (10, 0, 30, 0) | (10, 20, 10, 20) | (30, 40, 30, 40) | (10, 0, 10, 0) | (30, 0, 30, 0) => {},
+        match (
+            atime1.seconds,
+            atime1.useconds,
+            mtime1.seconds,
+            mtime1.useconds,
+        ) {
+            (10, 20, 30, 40) | (10, 0, 30, 0) | (10, 20, 10, 20) | (30, 40, 30, 40) |
+            (10, 0, 10, 0) | (30, 0, 30, 0) => {}
             times => panic!("{:?}", times),
         }
 
@@ -525,8 +531,14 @@ fn test_nfs_setattr() {
         // Don't check size or blocks for a directory
         let atime2 = attr2.attributes.atime;
         let mtime2 = attr2.attributes.mtime;
-        match (atime2.seconds, atime2.useconds, mtime2.seconds, mtime2.useconds) {
-            (50, 60, 70, 80) | (50, 0, 70, 0) | (50, 60, 50, 60) | (70, 80, 70, 80) | (50, 0, 50, 0) | (70, 0, 70, 0) => {},
+        match (
+            atime2.seconds,
+            atime2.useconds,
+            mtime2.seconds,
+            mtime2.useconds,
+        ) {
+            (50, 60, 70, 80) | (50, 0, 70, 0) | (50, 60, 50, 60) | (70, 80, 70, 80) |
+            (50, 0, 50, 0) | (70, 0, 70, 0) => {}
             times => panic!("{:?}", times),
         }
 
@@ -534,8 +546,14 @@ fn test_nfs_setattr() {
         // Don't check size or blocks for a directory
         let atime3 = attr3.attributes.atime;
         let mtime3 = attr3.attributes.mtime;
-        match (atime3.seconds, atime3.useconds, mtime3.seconds, mtime3.useconds) {
-            (MAX, 999999, MAX, 999999) | (MAX, 0, MAX, 0) => {},
+        match (
+            atime3.seconds,
+            atime3.useconds,
+            mtime3.seconds,
+            mtime3.useconds,
+        ) {
+            (MAX, 999999, MAX, 999999) |
+            (MAX, 0, MAX, 0) => {}
             times => panic!("{:?}", times),
         }
     })
