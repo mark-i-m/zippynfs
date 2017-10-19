@@ -335,6 +335,79 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
         )
     }
 
+    /// Set the attributes on the given file.
+    ///
+    /// NOTE: For now, if you change `atime` you must also change `mtime`, and vice versa. If you
+    /// only give `atime`, `mtime` is set to the same thing. If you only give `mtime` neither is
+    /// set.
+    ///
+    /// NOTE: This method ASSUMES the file actually exists! So you need to check before calling
+    /// this method!
+    fn fs_set_attr(
+        &self,
+        fpath_numbered: PathBuf,
+        _fid: Fid,
+        atime: Option<ZipTimeVal>,
+        mtime: Option<ZipTimeVal>,
+        size: Option<usize>,
+    ) -> thrift::Result<()> {
+        // For classes to help with *const c_char
+        use std::ffi::{CStr, CString};
+
+        // Update accessed and modified time
+        if let Some(atime) = atime {
+            let mtime = if let Some(mtime) = mtime {
+                mtime
+            } else {
+                atime.clone()
+            };
+
+            // Construct timevals_ptr
+            let access_timeval = libc::timeval {
+                tv_sec: atime.seconds,
+                tv_usec: atime.useconds,
+            };
+            let modified_timeval = libc::timeval {
+                tv_sec: mtime.seconds,
+                tv_usec: mtime.useconds,
+            };
+            let timevals = [access_timeval, modified_timeval];
+            let timevals_ptr = &timevals as *const libc::timeval;
+
+            // Construct filename_ptr
+            let filename = fpath_numbered
+                .clone()
+                .into_os_string()
+                .into_string()
+                .unwrap();
+
+            // The CString must be stored in a variable to avoid a dangling pointer
+            let filename_cstr = CString::new(filename).unwrap();
+            let filename_ptr = filename_cstr.as_ptr();
+
+            // Call utimes()
+            let retval = unsafe { libc::utimes(filename_ptr, timevals_ptr) };
+
+            if retval == -1 {
+                let errno = unsafe { *libc::__errno_location() };
+                if errno == libc::ENOENT {
+                    // If the file was concurrently renamed or deleted, return stale
+                    return Err(nfs_error(ZipErrorType::NFSERR_STALE));
+                } else {
+                    let errmsg_cstr = unsafe { CStr::from_ptr(libc::strerror(errno)) };
+                    let errmsg = errmsg_cstr.to_str().unwrap();
+                    panic!("Errno = {}, message: {}", errno, errmsg);
+                }
+            }
+        }
+
+        if let Some(_size) = size {
+            // TODO: call set_len to set size attribute
+        }
+
+        Ok(())
+    }
+
     /// Add the given name to the `name_lock`.
     ///
     /// Returns true if the name was locked and false it was already locked.
@@ -369,10 +442,18 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
 
         // Create numbered file or directory
         if is_file {
-            File::create(&fpath_numbered).map_err(|e| format!("{}", e))?;
+            // NOTE: Because we don't implement permissions, set them to 600, so that the server can do
+            // whatever it wants.
+            OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .open(&fpath_numbered)
+                .map_err(|e| e.to_string())?;
         } else {
             create_dir(&fpath_numbered).map_err(|e| format!("{}", e))?;
         }
+
 
         // Flush the directory
         let mut dir = File::open(dpath).unwrap();
@@ -438,7 +519,14 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
         // Create a new object
         let (new_fid, fpath_numbered) = self.fs_create_obj(dpath.clone(), filename, is_file)?;
 
-        // TODO: set attributes using fsargs.attributes
+        // Set attributes on the new file
+        self.fs_set_attr(
+            fpath_numbered.clone(),
+            new_fid,
+            fsargs.attributes.atime,
+            fsargs.attributes.mtime,
+            fsargs.attributes.size.map(|s| s as usize),
+        )?;
 
         // Unlock filename
         self.unlock_name(&(dpath, filename.to_owned()));
@@ -623,11 +711,6 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
     }
 
     fn handle_setattr(&self, fsargs: ZipSattrArgs) -> thrift::Result<ZipAttrStat> {
-        // For classes to help with *const c_char
-        use std::ffi::{CStr, CString};
-
-        // TODO: call set_len to set size attribute
-
         info!("Handling SETATTR {:?}", fsargs);
 
         // Find the file/directory. Note that the file may be concurrently renamed or deleted
@@ -639,44 +722,14 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
             Some(fpath_numbered) => {
                 debug!("Found file at server path {:?}", fpath_numbered);
 
-                // Construct timevals_ptr
-                let atime = fsargs.attributes.atime.unwrap();
-                let mtime = fsargs.attributes.mtime.unwrap();
-                let access_timeval = libc::timeval {
-                    tv_sec: atime.seconds,
-                    tv_usec: atime.useconds,
-                };
-                let modified_timeval = libc::timeval {
-                    tv_sec: mtime.seconds,
-                    tv_usec: mtime.useconds,
-                };
-                let timevals = [access_timeval, modified_timeval];
-                let timevals_ptr = &timevals as *const libc::timeval;
-
-                // Construct filename_ptr
-                let filename = fpath_numbered
-                    .clone()
-                    .into_os_string()
-                    .into_string()
-                    .unwrap();
-                // The CString must be stored in a variable to avoid a dangling pointer
-                let filename_cstr = CString::new(filename).unwrap();
-                let filename_ptr = filename_cstr.as_ptr();
-
-                // Call utimes()
-                let retval = unsafe { libc::utimes(filename_ptr, timevals_ptr) };
-
-                if retval == -1 {
-                    let errno = unsafe { *libc::__errno_location() };
-                    if errno == libc::ENOENT {
-                        // If the file was concurrently renamed or deleted, return stale
-                        return Err(nfs_error(ZipErrorType::NFSERR_STALE));
-                    } else {
-                        let errmsg_cstr = unsafe { CStr::from_ptr(libc::strerror(errno)) };
-                        let errmsg = errmsg_cstr.to_str().unwrap();
-                        panic!("Errno = {}, message: {}", errno, errmsg);
-                    }
-                }
+                // Attempt to set attributes
+                self.fs_set_attr(
+                    fpath_numbered.clone(),
+                    fsargs.file.fid as Fid,
+                    fsargs.attributes.atime,
+                    fsargs.attributes.mtime,
+                    fsargs.attributes.size.map(|s| s as usize),
+                )?;
 
                 // Done
                 Ok(ZipAttrStat::new(
@@ -936,7 +989,8 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
             return Err(res.err().unwrap().into());
         }
 
-        // TODO: attributes
+        // TODO: attributes -- since we set attributes on the numbered file, maybe we don't need to
+        // do anything to have them set correctly?
 
         // Flush the directory
         let res = new_loc_dir.flush();
