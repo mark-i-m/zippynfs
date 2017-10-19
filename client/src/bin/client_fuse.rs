@@ -8,6 +8,7 @@ extern crate time;
 extern crate client;
 extern crate zippyrpc;
 
+use std::collections::HashMap;
 use std::time::Duration;
 use std::process::exit;
 use std::thread::sleep;
@@ -32,6 +33,9 @@ const TTL: Timespec = Timespec { sec: 1, nsec: 0 }; // 1 second
 
 /// The maximum number of retries (with exponential backoff) before giving up
 const MAX_TRIES: usize = 5;
+
+/// A type representing a File ID (FID)
+type Fid = usize;
 
 /// A macro for the repeated error handling that everyone does...
 ///
@@ -165,6 +169,10 @@ struct ZippyFileSystem {
     znfs: ZnfsClient, // Thrift client
     server_addr: String, // Needed to reconnect
     server_epoch: u64, // Server's generation number
+
+    // buffers for the client to store data that has been unstablely written until commit.
+    // Fid -> [(offset, size, data)]
+    async_bufs: HashMap<Fid, Vec<(usize, usize, Vec<u8>)>>,
 }
 
 impl ZippyFileSystem {
@@ -212,24 +220,22 @@ impl ZippyFileSystem {
         }
     }
 
-    /// Write 0 or more bytes from the buffer to the given file.
+    /// Fully write up to MAX_BUF_LEN bytes from the buffer to the given file.
     fn write_part(
         &mut self,
-        _req: &Request,
-        ino: u64,
-        _fh: u64,
+        fid: u64,
         offset: u64,
         data_vec: Vec<u8>,
-        _flags: u32,
-    ) -> Result<(), c_int> {
+        stable: ZipWriteStable,
+    ) -> Result<u64, c_int> {
         let data_len = min(data_vec.len(), MAX_BUF_LEN);
 
         let args = ZipWriteArgs::new(
-            ZipFileHandle::new(ino as i64),
+            ZipFileHandle::new(fid as i64),
             offset as i64,
             data_len as i64,
             data_vec,
-            ZipWriteStable::FILE_SYNC,
+            stable,
         );
 
         let result =
@@ -240,17 +246,118 @@ impl ZippyFileSystem {
 
         match result {
             Ok(result) => {
-                self.server_epoch = result.verf as u64;
-
-                // TODO: Check if it was a commit type or not
                 println!("Write mode = {:?}", result.committed);
                 assert_eq!(result.count as usize, data_len);
 
-                Ok(())
+                Ok(result.verf as u64)
             }
             Err(err) => Err(err),
         }
 
+    }
+
+    /// Attempt to write async until we succeed without epoch changes
+    ///
+    /// NOTE: this assumes the fid is actually in the table.
+    fn write_async_handle_epochs(&mut self, fid: Fid, mut pos: usize) -> Result<(), c_int> {
+        // Get the set of writes
+        let writes_len = self.async_bufs.get(&fid).unwrap().len();
+
+        // Keep trying until we succeed without an epoch change
+        while pos < writes_len {
+            // Get a write
+            let (offset, size, data) = {
+                let (offset, size, ref data) = self.async_bufs.get(&fid).unwrap()[pos];
+                (offset, size, data.clone())
+            };
+
+            // Sanity
+            assert_eq!(size, data.len());
+
+            // Attempt to write it
+            let epoch = self.write_part(
+                fid as u64,
+                offset as u64,
+                data,
+                ZipWriteStable::UNSTABLE,
+            )?;
+
+            // Sanity
+            assert!(epoch >= self.server_epoch);
+
+            // If the epoch changed, then we need to start over
+            if epoch != self.server_epoch {
+                self.server_epoch = epoch;
+                pos = 0;
+            } else {
+                pos += 1;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// A helper to in sending async writes to the server.
+    ///
+    /// It handles all of the weirdness of dealing with errors and server epoch numbers.
+    ///
+    /// It assumes we will never get a write of more than MAX_BUF_LEN bytes to send.
+    fn write_async_part(
+        &mut self,
+        fid: Fid,
+        offset: u64,
+        size: u64,
+        data: Vec<u8>,
+    ) -> Result<(), c_int> {
+        // Append to the appropriate set of async bufs
+        let pos = if self.async_bufs.contains_key(&fid) {
+            let async_bufs = self.async_bufs.get_mut(&fid).unwrap();
+            async_bufs.push((offset as usize, size as usize, data));
+            async_bufs.len() - 1
+        } else {
+            let buf = vec![(offset as usize, size as usize, data)];
+            self.async_bufs.insert(fid, buf);
+            0
+        };
+
+        // Then attempt to write frome the given position
+        self.write_async_handle_epochs(fid, pos)
+    }
+
+    /// A helper for running a COMMIT
+    fn commit(&mut self, fid: Fid) -> Result<(), c_int> {
+        // Keep trying until we succeed without an epoch change
+        loop {
+            // Try to send a COMMIT message and get the epoch #
+            let epoch = {
+                // Commit the whole file
+                let args = ZipCommitArgs::new(ZipFileHandle::new(fid as i64), 0, 0);
+
+                // Try to do the operation
+                let result =
+                    do_with_retry! {
+                        self,
+                        self.znfs.commit(args.clone()).map_err(|e| e.into())
+                    };
+
+                // Extract the epoch number
+                result.map(|r| r.verf as u64)?
+            };
+
+            // Epoch sanity
+            assert!(epoch >= self.server_epoch);
+
+            // If the epoch number matches, then we are done. Otherwise, redo...
+            if epoch == self.server_epoch {
+                // Cleanup!
+                self.async_bufs.remove(&fid);
+                break;
+            } else {
+                self.write_async_handle_epochs(fid, 0)?;
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -699,8 +806,9 @@ impl Filesystem for ZippyFileSystem {
             offset,
             _flags
         );
-        let data_len = min(data.len(), MAX_BUF_LEN);
-        let mut data_vec = Vec::from(&data[0..data_len]);
+
+        let mut data_vec = Vec::from(data);
+        let data_len = data_vec.len();
 
         let mut sent_bytes = 0;
 
@@ -710,8 +818,9 @@ impl Filesystem for ZippyFileSystem {
             let mut to_send = data_vec;
             data_vec = to_send.split_off(to_send_len);
 
-            // We know that this fully writes the data
-            let result = self.write_part(_req, ino, fh, offset + sent_bytes, to_send, _flags);
+            // We know that this fully writes the data.
+            let result =
+                self.write_part(ino, offset + sent_bytes, to_send, ZipWriteStable::FILE_SYNC);
 
             if let Err(err) = result {
                 reply.error(err);
@@ -885,6 +994,7 @@ fn run(server_addr: &str, mnt_path: &str) -> Result<(), String> {
             znfs: znfs,
             server_addr: server_addr.to_owned(),
             server_epoch: 0, // until we set it in `init`
+            async_bufs: HashMap::new(),
         },
         &mount_path,
         &[], // mount options
