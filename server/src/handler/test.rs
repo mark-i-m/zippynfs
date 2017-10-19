@@ -76,18 +76,21 @@ where
 
 fn fake_sattr_args(
     fid: i64,
-    mode: Option<i16>,
-    uid: Option<i64>,
-    gid: Option<i64>,
     size: Option<i64>,
     atime: Option<(i64, i64)>,
     mtime: Option<(i64, i64)>,
 ) -> ZipSattrArgs {
-    let file = ZipFileHandle::new(fid);
-    let atime = atime.map(|(seconds, useconds)| ZipTimeVal { seconds, useconds });
-    let mtime = mtime.map(|(seconds, useconds)| ZipTimeVal { seconds, useconds });
-    let attributes = ZipSattr::new(mode, uid, gid, size, atime, mtime);
-    ZipSattrArgs::new(file, attributes)
+    ZipSattrArgs::new(
+        ZipFileHandle::new(fid),
+        ZipSattr::new(
+            Some(-1), // mode
+            Some(-1), // uid
+            Some(-1), // gid
+            size,
+            atime.map(|(seconds, useconds)| ZipTimeVal { seconds, useconds }),
+            mtime.map(|(seconds, useconds)| ZipTimeVal { seconds, useconds }),
+        )
+    )
 }
 
 fn fake_dir_op_args(did: i64, filename: &str) -> ZipDirOpArgs {
@@ -461,23 +464,21 @@ fn test_nfs_getattr() {
 }
 
 #[test]
-fn test_nfs_setattr() {
+fn test_nfs_setattr_time() {
     use std::i32;
 
     run_with_clone_fs("test_files/test1", true, |fspath| {
         // Create a server
         let server = ZippynfsServer::new(fspath);
-        // TODO: this should be i64::MAX, test overflow and negative numbers
-        const MAX: i64 = i32::MAX as i64;
+
+        // Larger values fail on AFS
+        const MAX_SECONDS: i64 = i32::MAX as i64;
 
         // SETATTR a bunch of things
         let attr1 = server
             .handle_setattr(fake_sattr_args(
                 4,
-                Some(077),
-                Some(0),
-                Some(0),
-                Some(0),
+                None,
                 Some((10, 20)),
                 Some((30, 40)),
             ))
@@ -485,10 +486,7 @@ fn test_nfs_setattr() {
         let attr2 = server
             .handle_setattr(fake_sattr_args(
                 1,
-                Some(077),
-                Some(0),
-                Some(0),
-                Some(0),
+                None,
                 Some((50, 60)),
                 Some((70, 80)),
             ))
@@ -496,12 +494,9 @@ fn test_nfs_setattr() {
         let attr3 = server
             .handle_setattr(fake_sattr_args(
                 3,
-                Some(077),
-                Some(0),
-                Some(0),
-                Some(0),
-                Some((MAX, 999999)),
-                Some((MAX, 999999)),
+                None,
+                Some((MAX_SECONDS, 999999)),
+                Some((MAX_SECONDS, 999999)),
             ))
             .unwrap();
 
@@ -543,7 +538,8 @@ fn test_nfs_setattr() {
         }
 
         assert_eq!(attr3.attributes.type_, ZipFtype::NFREG);
-        // Don't check size or blocks for a directory
+        assert_eq!(attr3.attributes.size, 27);
+        assert_eq!(attr3.attributes.blocks, 1);
         let atime3 = attr3.attributes.atime;
         let mtime3 = attr3.attributes.mtime;
         match (
@@ -552,8 +548,71 @@ fn test_nfs_setattr() {
             mtime3.seconds,
             mtime3.useconds,
         ) {
-            (MAX, 999999, MAX, 999999) |
-            (MAX, 0, MAX, 0) => {}
+            (MAX_SECONDS, 999999, MAX_SECONDS, 999999) |
+            (MAX_SECONDS, 0, MAX_SECONDS, 0) => {}
+            times => panic!("{:?}", times),
+        }
+    })
+}
+
+#[test]
+fn test_nfs_setattr_size() {
+    run_with_clone_fs("test_files/test1", true, |fspath| {
+        // Create a server
+        let server = ZippynfsServer::new(fspath);
+
+        // SETATTR a bunch of things
+        let attr1 = server
+            .handle_setattr(fake_sattr_args(
+                4,
+                Some(10),
+                None,
+                None,
+            ))
+            .unwrap();
+        let attr2 = server
+            .handle_setattr(fake_sattr_args(
+                1,
+                Some(10),
+                None,
+                None,
+            ));
+        let attr3 = server
+            .handle_setattr(fake_sattr_args(
+                3,
+                Some(10),
+                Some((0, 0)),
+                Some((0, 0)),
+            ))
+            .unwrap();
+
+        // For the files
+        assert!(attr2.is_err());
+        match attr2.map_err(|e| e.into()).err().unwrap() {
+            ZipError::Nfs(ZipErrorType::NFSERR_ISDIR, _) => {}
+            _ => assert!(false),
+        }
+
+        assert_eq!(attr1.attributes.fid, 4);
+        assert_eq!(attr3.attributes.fid, 3);
+
+        assert_eq!(attr1.attributes.type_, ZipFtype::NFREG);
+        assert_eq!(attr1.attributes.size, 10);
+        assert_eq!(attr1.attributes.blocks, 1);
+
+        assert_eq!(attr3.attributes.type_, ZipFtype::NFREG);
+        assert_eq!(attr3.attributes.size, 10);
+        assert_eq!(attr3.attributes.blocks, 1);
+        let atime3 = attr3.attributes.atime;
+        let mtime3 = attr3.attributes.mtime;
+        // Some filesystems set useconds to 0, and some make atime and mtime the same
+        match (
+            atime3.seconds,
+            atime3.useconds,
+            mtime3.seconds,
+            mtime3.useconds,
+        ) {
+            (0, 0, 0, 0) => {}
             times => panic!("{:?}", times),
         }
     })

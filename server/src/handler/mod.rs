@@ -351,8 +351,26 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
         mtime: Option<ZipTimeVal>,
         size: Option<usize>,
     ) -> thrift::Result<()> {
-        // For classes to help with *const c_char
-        use std::ffi::{CStr, CString};
+        // For class to help with *const c_char
+        use std::ffi::CStr;
+        use std::os::unix::io::AsRawFd;
+
+        // Create f, so we can change its metadata
+        let mut open_options = OpenOptions::new();
+        if fpath_numbered.is_dir() {
+            open_options.read(true)
+        } else {
+            open_options.read(true).write(true)
+        };
+        let f = open_options.open(&fpath_numbered).unwrap();
+
+        // Update size
+        if let Some(size) = size {
+            if fpath_numbered.is_dir() {
+                return Err(nfs_error(ZipErrorType::NFSERR_ISDIR));
+            }
+            f.set_len(size as u64).unwrap();
+        }
 
         // Update accessed and modified time
         if let Some(atime) = atime {
@@ -362,31 +380,23 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
                 atime.clone()
             };
 
-            // Construct timevals_ptr
-            let access_timeval = libc::timeval {
+            // Construct timespecs_ptr
+            let access_timespec = libc::timespec {
                 tv_sec: atime.seconds,
-                tv_usec: atime.useconds,
+                tv_nsec: atime.useconds * (NANOS_PER_MICRO as i64),
             };
-            let modified_timeval = libc::timeval {
+            let modified_timespec = libc::timespec {
                 tv_sec: mtime.seconds,
-                tv_usec: mtime.useconds,
+                tv_nsec: mtime.useconds * (NANOS_PER_MICRO as i64),
             };
-            let timevals = [access_timeval, modified_timeval];
-            let timevals_ptr = &timevals as *const libc::timeval;
+            let timespecs = [access_timespec, modified_timespec];
+            let timespecs_ptr = &timespecs as *const libc::timespec;
 
-            // Construct filename_ptr
-            let filename = fpath_numbered
-                .clone()
-                .into_os_string()
-                .into_string()
-                .unwrap();
+            // Get raw fd
+            let fd = f.as_raw_fd();
 
-            // The CString must be stored in a variable to avoid a dangling pointer
-            let filename_cstr = CString::new(filename).unwrap();
-            let filename_ptr = filename_cstr.as_ptr();
-
-            // Call utimes()
-            let retval = unsafe { libc::utimes(filename_ptr, timevals_ptr) };
+            // Call futimens()
+            let retval = unsafe { libc::futimens(fd, timespecs_ptr) };
 
             if retval == -1 {
                 let errno = unsafe { *libc::__errno_location() };
@@ -401,9 +411,8 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
             }
         }
 
-        if let Some(_size) = size {
-            // TODO: call set_len to set size attribute
-        }
+        // There is no "sync_metadata()", so we call sync_all()
+        f.sync_all().unwrap();
 
         Ok(())
     }
@@ -454,16 +463,15 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
             create_dir(&fpath_numbered).map_err(|e| format!("{}", e))?;
         }
 
-
-        // Flush the directory
-        let mut dir = File::open(dpath).unwrap();
-        dir.flush().map_err(|e| format!("{}", e))?;
+        // Sync the directory
+        let dir = File::open(dpath).unwrap();
+        dir.sync_all().map_err(|e| format!("{}", e))?;
 
         // Create named file
         File::create(&fpath_named).map_err(|e| format!("{}", e))?;
 
-        // Flush the directory
-        dir.flush().map_err(|e| format!("{}", e))?;
+        // Sync the directory
+        dir.sync_all().map_err(|e| format!("{}", e))?;
 
         // Done
         Ok((fid, fpath_numbered))
@@ -578,15 +586,15 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
         // Remove the fid from the cache
         let _ = fid_cache_locked.remove(&(fid as usize));
 
-        // Flush the directory
-        let mut dir = File::open(dpath).unwrap();
-        dir.flush().map_err(|e| format!("{}", e))?;
+        // Sync the directory
+        let dir = File::open(dpath).unwrap();
+        dir.sync_all().map_err(|e| format!("{}", e))?;
 
         // Remove numbered file
         remove_file(fpath_named).map_err(|e| format!("{}", e))?;
 
-        // Flush the directory
-        dir.flush().map_err(|e| format!("{}", e))?;
+        // Sync the directory
+        dir.sync_all().map_err(|e| format!("{}", e))?;
 
         // `fid_cache_locked` dropped
 
@@ -662,7 +670,7 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
             // Open the file for the write
             let mut tmp_file = OpenOptions::new().write(true).open(&tmp_fpath)?;
 
-            // Flush the tmp file to ensure we have its contents
+            // Sync the tmp file to ensure we have its contents
             tmp_file.sync_all()?;
 
             // Seek to the write location
@@ -672,7 +680,7 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
             assert_eq!(buf.len(), count);
             tmp_file.write_all(buf)?;
 
-            // Flush the file
+            // Sync the file
             tmp_file.sync_all()?;
         } // File closed
 
@@ -1019,7 +1027,7 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
 
         // If we get to this point, we know that we own the name!
 
-        let mut new_loc_dir = File::open(new_loc_dpath.clone()).unwrap();
+        let new_loc_dir = File::open(new_loc_dpath.clone()).unwrap();
 
         let fid = fid.unwrap();
         let old_loc_fpath_named =
@@ -1037,11 +1045,8 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
             return Err(res.err().unwrap().into());
         }
 
-        // TODO: attributes -- since we set attributes on the numbered file, maybe we don't need to
-        // do anything to have them set correctly?
-
-        // Flush the directory
-        let res = new_loc_dir.flush();
+        // Sync the directory
+        let res = new_loc_dir.sync_all();
         if res.is_err() {
             self.unlock_name(&(new_loc_dpath.clone(), fsargs.new_loc.filename.clone()));
             return Err(res.err().unwrap().into());
@@ -1061,8 +1066,8 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
                 return Err(res.err().unwrap().into());
             }
 
-            // Flush the directory
-            let res = new_loc_dir.flush();
+            // Sync the directory
+            let res = new_loc_dir.sync_all();
             if res.is_err() {
                 self.unlock_name(&(new_loc_dpath.clone(), fsargs.new_loc.filename));
                 return Err(res.err().unwrap().into());
@@ -1082,7 +1087,7 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
         // Unlock the name
         self.unlock_name(&(new_loc_dpath.clone(), fsargs.new_loc.filename));
 
-        // Remove the old named file... we don't even need to flush!
+        // Remove the old named file... we don't even need to sync!
         remove_file(old_loc_fpath_named)?;
 
         // DONE!
@@ -1264,10 +1269,10 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
             // Open the file for the write
             let mut tmp_file = OpenOptions::new().write(true).open(&tmp_fpath)?;
 
-            // Flush the tmp file to ensure we have its contents
+            // Sync the tmp file to ensure we have its contents
             tmp_file.sync_all()?;
 
-            // Do each write onto the tmp file and flush them together
+            // Do each write onto the tmp file and sync them together
             //
             // NOTE: this also empties the Vec, so that future lockers will see no work to do!
             for (offset, count, buf) in to_write.drain(..) {
@@ -1279,7 +1284,7 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
                 tmp_file.write_all(&buf)?;
             }
 
-            // Flush the file
+            // Sync the file
             tmp_file.sync_all()?;
         } // File closed
 
