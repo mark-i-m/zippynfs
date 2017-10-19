@@ -12,7 +12,7 @@ use std::fs::{create_dir, read_dir, remove_dir, remove_file, rename, copy, File,
 use std::io::{Write, Seek, SeekFrom};
 use std::mem;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, RwLock};
+use std::sync::{Mutex, RwLock, Arc};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::thread::current;
 use std::collections::{HashSet, HashMap, VecDeque};
@@ -78,7 +78,7 @@ pub struct ZippynfsServer<'a, P: AsRef<Path>> {
     /// Buffers for data written by the client asynchronously (with the UNSTABLE flag).
     ///
     /// Fid -> [(offset, size, data)]
-    async_bufs: RwLock<HashMap<Fid, Mutex<(usize, usize, Vec<u8>)>>>,
+    async_bufs: RwLock<HashMap<Fid, Arc<Mutex<Vec<(usize, usize, Vec<u8>)>>>>>,
 }
 
 impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
@@ -681,6 +681,21 @@ impl<'a, P: AsRef<Path>> ZippynfsServer<'a, P> {
 
         Ok(buf.len())
     }
+
+    /// Get or create the `async_bufs` entry for the given FID.
+    fn get_or_create_async_bufs(&self, fid: Fid) -> Arc<Mutex<Vec<(usize, usize, Vec<u8>)>>> {
+        // Check if the entry exists in the table already
+        if let Some(entry) = self.async_bufs.read().unwrap().get(&fid) {
+            entry.clone()
+        } else {
+            // Writer lock, then insert new entry
+            let mut write_locked = self.async_bufs.write().unwrap();
+            write_locked.insert(fid, Arc::new(Mutex::new(Vec::new())));
+
+            // Get the entry and return
+            write_locked.get(&fid).unwrap().clone()
+        }
+    }
 }
 
 impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
@@ -853,8 +868,24 @@ impl<'a, P: AsRef<Path>> ZippynfsSyncHandler for ZippynfsServer<'a, P> {
             }
 
             ZipWriteStable::UNSTABLE => {
-                // TODO
-                Err("Unimplemented".into())
+                let size = fsargs.count as usize;
+
+                // Sanity
+                assert_eq!(fsargs.data.len(), size);
+
+                // Get or create the appropriate buffer set and append the given data to the buffer
+                let unlocked = self.get_or_create_async_bufs(fsargs.file.fid as Fid);
+                unlocked.lock().unwrap().push((
+                    fsargs.offset as usize,
+                    size,
+                    fsargs.data,
+                ));
+
+                Ok(ZipWriteRes::new(
+                    size as i64,
+                    ZipWriteStable::UNSTABLE,
+                    self.epoch as i64,
+                ))
             }
         }
     }
