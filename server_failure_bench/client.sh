@@ -39,7 +39,7 @@ main() {
     # Run client
     cd ../client/
     echo 'Starting client...'
-    cargo run --bin client_fuse -- -s "$1" -m "$2"
+    cargo run --release --bin client_fuse -- -s "$1" -m "$2"
 
     # We shouldn't reach this point
     cleanup

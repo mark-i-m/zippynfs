@@ -35,7 +35,7 @@ main() {
     # Run server until the first COMMIT message
     echo 'Starting server...'
     cd ../server/
-    (RUST_LOG=info cargo run --color=never -- -s "$1" -d "$2" 2>&1 > /dev/null & echo $! >&3) 3> ./pid | grep -m1 'Handling COMMMIT ZipCommitArgs' > /dev/null
+    (RUST_LOG=info cargo run --release --color=never -- -s "$1" -d "$2" 2>&1 > /dev/null & echo $! >&3) 3> ./pid | grep -m1 'Handling COMMMIT ZipCommitArgs' > /dev/null
 
     echo 'Killing server...'
     kill "$(cat ./pid)"
@@ -43,7 +43,7 @@ main() {
 
     # Run server again
     echo 'Starting server...'
-    cargo run --color=never -- -s "$1" -d "$2" 2>&1 > /dev/null
+    cargo run --release --color=never -- -s "$1" -d "$2" 2>&1 > /dev/null
 }
 
 main "$@"
