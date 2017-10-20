@@ -1,60 +1,35 @@
-AWS->AWS
+Latency of directory operations
+===============================
 
-time touch `seq 1 1000`
-real	0m13.470s
-user	0m0.000s
-sys	0m0.032s
+Run with AWS client and server.
 
-time rm `seq 1 1000`
-real	0m7.950s
-user	0m0.012s
-sys	0m0.012s
-
+Benchmark                | Latency
+-------------------------|----------
+time touch `seq 1 1000`  |  13.5s
+time rm `seq 1 1000`     |   8.0s
 
 
 ----------------------
 
-Write 10MiB
+Write 10MiB (see graph)
+===========
 
-AWS->AWS async
-real	0m1.437s
-user	0m0.000s
-sys	0m0.000s
+Time taken to copy 10MiB into the NFS.
 
-AWS->AWS sync
-real	3m38.582s
-user	0m0.004s
-sys	0m0.000s
-
-localhost->AWS async
-real	2m25.898s
-user	0m0.000s
-sys	0m0.012s
-
-localhost->AWS sync
-real	4m19.715s
-user	0m0.000s
-sys	0m0.008s
-
-localhost->localhost async
-real	0m0.340s
-user	0m0.000s
-sys	0m0.000s
-
-localhost->localhost async with crash at commit
-real    0m3.251s
-user    0m0.000s
-sys 0m0.000s
-
-localhost->localhost sync
-real	7m26.391s
-user	0m0.004s
-sys	0m0.000s
+Client     | Server      | Writes     | Time (s)
+-----------|-------------|------------|-------------
+AWS        | AWS         | UNSTABLE   |   1.4
+AWS        | AWS         | FILE_SYNC  | 218.5
+seclab8    | AWS         | UNSTABLE   | 145.9
+seclab8    | AWS         | FILE_SYNC  | 259.7
+seclab8    | seclab8     | UNSTABLE   |   0.3
+seclab8    | seclab8     | FILE_SYNC  | 446.4
 
 
 -----------------------
 
-Bandwidth of Write on localhost on 1MiB files
+Bandwidth of Write on localhost on 1MiB files (see graph)
+=============================================
 
 Num clients | BW per client (MB/s)
 ------------|---------------
@@ -67,3 +42,17 @@ Num clients | BW per client (MB/s)
 3           | 3.8
 2           | 4.6
 1           | 7.2
+
+
+-----------------------
+
+Latency of 10MiB writes with failure before commit
+==================================================
+
+Only UNSTABLE writes + Commit.
+
+Client     | Server      | Time (s)
+-----------|-------------|-------------
+AWS        | AWS         |   5.6
+seclab8    | AWS         | 
+seclab8    | seclab8     | 
