@@ -13,8 +13,7 @@ concurrent operations and crashes.
 
 - Renaming a file is atomic.
 - Small writes are atomic (<= 4000B).
-- The same consistency semantics as NFS (close-to-open), to the best of our
-  knowledge. This is a pretty meaningless guarantee, but there it is :P
+- We guarantee nothing else about concurrent writes, including about their durability.
 
 ### Assumptions
 
