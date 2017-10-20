@@ -41,6 +41,11 @@ real	0m0.340s
 user	0m0.000s
 sys	0m0.000s
 
+localhost->localhost async with crash at commit
+real    0m4.535s
+user    0m0.000s
+sys 0m0.004s
+
 localhost->localhost sync
 real	7m26.391s
 user	0m0.004s
