@@ -3,10 +3,10 @@ Latency of directory operations
 
 Run with AWS client and server.
 
-Benchmark                | Latency
--------------------------|----------
-time touch `seq 1 1000`  |  13.5s
-time rm `seq 1 1000`     |   8.0s
+Benchmark                       | Latency
+--------------------------------|----------
+```time touch `seq 1 1000` ```  |  13.5s
+```time rm `seq 1 1000` ```     |   8.0s
 
 
 ----------------------
