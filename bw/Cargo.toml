@@ -1,0 +1,7 @@
+[package]
+name = "bw"
+version = "0.1.0"
+authors = ["Mark Mansi <markm@cs.wisc.edu>"]
+
+[dependencies]
+rand = "0.3.17"

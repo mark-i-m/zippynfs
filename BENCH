@@ -48,3 +48,17 @@ sys	0m0.000s
 
 
 -----------------------
+
+Bandwidth of Write on localhost on 1MiB files
+
+Num clients | BW per client (MB/s)
+------------|---------------
+9           | 2.1
+8           | 2.2
+7           | 2.5
+6           | 2.7
+5           | 3.1
+4           | 3.5
+3           | 3.8
+2           | 4.6
+1           | 7.2
