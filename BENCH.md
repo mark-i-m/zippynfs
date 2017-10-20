@@ -46,7 +46,7 @@ Num clients | BW per client (MB/s)
 
 -----------------------
 
-Latency of 10MiB writes with failure before commit
+Latency of 10MiB writes with failure before commit (see graph)
 ==================================================
 
 Only UNSTABLE writes + Commit.
