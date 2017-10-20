@@ -22,7 +22,8 @@ concurrent operations and crashes.
 
 ### Performance Assumptions/Usage Cases
 
-TODO
+- We assume large files are rarely written.
+- We assume most file operations are on small files.
 
 ## Design
 
