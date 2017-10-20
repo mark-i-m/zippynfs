@@ -54,5 +54,5 @@ Only UNSTABLE writes + Commit.
 Client     | Server      | Time (s)
 -----------|-------------|-------------
 AWS        | AWS         |   5.6
-seclab8    | AWS         | 
-seclab8    | seclab8     | 
+seclab8    | AWS         | 294.7
+seclab8    | seclab8     |   3.5
