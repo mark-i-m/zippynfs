@@ -1,0 +1,50 @@
+AWS->AWS
+
+time touch `seq 1 1000`
+real	0m13.470s
+user	0m0.000s
+sys	0m0.032s
+
+time rm `seq 1 1000`
+real	0m7.950s
+user	0m0.012s
+sys	0m0.012s
+
+
+
+----------------------
+
+Write 10MiB
+
+AWS->AWS async
+real	0m1.437s
+user	0m0.000s
+sys	0m0.000s
+
+AWS->AWS sync
+real	3m38.582s
+user	0m0.004s
+sys	0m0.000s
+
+localhost->AWS async
+real	2m25.898s
+user	0m0.000s
+sys	0m0.012s
+
+localhost->AWS sync
+real	4m19.715s
+user	0m0.000s
+sys	0m0.008s
+
+localhost->localhost async
+real	0m0.340s
+user	0m0.000s
+sys	0m0.000s
+
+localhost->localhost sync
+real	7m26.391s
+user	0m0.004s
+sys	0m0.000s
+
+
+-----------------------
